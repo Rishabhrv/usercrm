@@ -86,11 +86,11 @@ def validate_token():
 
 #user_role = st.session_state.get("role", "Guest")
 
-user_role = "writer"
+#user_role = "writer"
 # user_role = "proofreader"
 
-# user_role = st.pills("Select Role", ["writer", "proofreader", "formatter", "cover_designer"], default="writer", label_visibility='collapsed', key="user_role")
-# user_role = user_role
+user_role = st.pills("Select Role", ["writer", "proofreader", "formatter", "cover_designer"], default="writer", label_visibility='collapsed', key="user_role")
+user_role = user_role
 
 
 st.cache_data.clear()
@@ -110,39 +110,41 @@ def connect_db():
 # Connect to MySQL
 conn = connect_db()
 
-
-###################################################################################################################
-#######################################  New Functions #############################################
-###################################################################################################################
-
 from datetime import datetime, timedelta
 
-def fetch_books(months_back: int = 3, section: str = "writing") -> pd.DataFrame:
+def fetch_books(months_back: int = 4, section: str = "writing") -> pd.DataFrame:
     conn = connect_db()
     cutoff_date = datetime.now().date() - timedelta(days=30 * months_back)
     cutoff_date_str = cutoff_date.strftime('%Y-%m-%d')
     
-    # Define section-specific columns with consistent renaming
     section_columns = {
         "writing": {
             "base": ["writing_by AS 'Writing By'", "writing_start AS 'Writing Start'", "writing_end AS 'Writing End'"],
             "extra": [],
-            "publish_filter": "AND is_publish_only = 0"  # Only for writing
+            "publish_filter": "AND is_publish_only = 0"
         },
         "proofreading": {
             "base": ["proofreading_by AS 'Proofreading By'", "proofreading_start AS 'Proofreading Start'", "proofreading_end AS 'Proofreading End'"],
             "extra": ["writing_end AS 'Writing End'", "writing_by AS 'Writing By'"],
-            "publish_filter": ""  # No filter for proofreading
+            "publish_filter": ""
         },
         "formatting": {
             "base": ["formatting_by AS 'Formatting By'", "formatting_start AS 'Formatting Start'", "formatting_end AS 'Formatting End'"],
             "extra": ["proofreading_end AS 'Proofreading End'", "book_pages AS 'Total Book Pages'"],
-            "publish_filter": ""  # No filter for formatting
+            "publish_filter": ""
         },
         "cover": {
-            "base": ["cover_by AS 'Cover By'", "cover_start AS 'Cover Start'", "cover_end AS 'Cover End'"],
-            "extra": [],
-            "publish_filter": ""  # No filter for cover
+            "base": [
+                "cover_by AS 'Cover By'", 
+                "front_cover_start AS 'Front Cover Start'", 
+                "front_cover_end AS 'Front Cover End'", 
+                "back_cover_start AS 'Back Cover Start'", 
+                "back_cover_end AS 'Back Cover End'", 
+                "apply_isbn AS 'Apply ISBN'", 
+                "isbn AS 'ISBN'"
+            ],
+            "extra": ["formatting_end AS 'Formatting End'"],
+            "publish_filter": ""
         }
     }
     config = section_columns.get(section, section_columns["writing"])
@@ -150,21 +152,68 @@ def fetch_books(months_back: int = 3, section: str = "writing") -> pd.DataFrame:
     columns_str = ", ".join(columns)
     publish_filter = config["publish_filter"]
     
-    query = f"""
-        SELECT 
-            book_id AS 'Book ID',
-            title AS 'Title',
-            date AS 'Date',
-            {columns_str},
-            is_publish_only AS 'Is Publish Only'
-        FROM books 
-        WHERE date >= '{cutoff_date_str}'
-        {publish_filter}
-        ORDER BY date DESC
-    """
+    if section == "cover":
+        query = f"""
+            SELECT 
+                b.book_id AS 'Book ID',
+                b.title AS 'Title',
+                b.date AS 'Date',
+                {columns_str},
+                b.is_publish_only AS 'Is Publish Only',
+                GROUP_CONCAT(CONCAT(a.name, ' (Pos: ', ba.author_position, ', Photo: ', ba.photo_recive, ', Sent: ', ba.author_details_sent, ')') SEPARATOR ', ') AS 'Author Details'
+            FROM books b
+            LEFT JOIN book_authors ba ON b.book_id = ba.book_id
+            LEFT JOIN authors a ON ba.author_id = a.author_id
+            WHERE b.date >= '{cutoff_date_str}'
+            {publish_filter}
+            GROUP BY b.book_id, b.title, b.date, b.cover_by, b.front_cover_start, b.front_cover_end, b.back_cover_start, b.back_cover_end, b.apply_isbn, b.isbn, b.is_publish_only
+            ORDER BY b.date DESC
+        """
+    else:
+        query = f"""
+            SELECT 
+                book_id AS 'Book ID',
+                title AS 'Title',
+                date AS 'Date',
+                {columns_str},
+                is_publish_only AS 'Is Publish Only'
+            FROM books 
+            WHERE date >= '{cutoff_date_str}'
+            {publish_filter}
+            ORDER BY date DESC  # Fixed: Removed 'b.' since no alias is used
+        """
+    
     df = conn.query(query, show_spinner=False)
     df['Date'] = pd.to_datetime(df['Date']).dt.date
     return df
+
+def fetch_author_details(book_id):
+    conn = connect_db()
+    query = f"""
+        SELECT 
+            a.name AS 'Author Name',
+            ba.author_position AS 'Position',
+            ba.photo_recive AS 'Photo Received',
+            ba.author_details_sent AS 'Details Sent'
+        FROM book_authors ba
+        JOIN authors a ON ba.author_id = a.author_id
+        WHERE ba.book_id = {book_id}
+    """
+    df = conn.query(query, show_spinner=False)
+    return df
+
+from streamlit import experimental_dialog
+
+@st.dialog("Author Details", width='large')
+def show_author_details_dialog(book_id):
+    author_details_df = fetch_author_details(book_id)
+    if not author_details_df.empty:
+        st.table(author_details_df)
+    else:
+        st.write("No author details available.")
+    if st.button("Close"):
+        st.session_state[f"dialog_open_{book_id}"] = False
+        st.rerun()
 
 # --- Reusable Month Selector ---
 def render_month_selector(books_df):
@@ -176,23 +225,42 @@ def render_month_selector(books_df):
                              label_visibility='collapsed')
     return selected_month
 
-# --- Reusable Metrics ---
+from datetime import datetime, timedelta
+
 def render_metrics(books_df, selected_month, section):
+    # Convert selected_month (e.g., "April 2025") to date range
     selected_month_dt = datetime.strptime(selected_month, '%B %Y')
     month_start = selected_month_dt.replace(day=1).date()
     month_end = (selected_month_dt.replace(day=1) + timedelta(days=31)).replace(day=1).date() - timedelta(days=1)
     filtered_books = books_df[(books_df['Date'] >= month_start) & (books_df['Date'] <= month_end)]
 
     total_books = len(filtered_books)
-    completed_books = len(filtered_books[
-        filtered_books[f'{section.capitalize()} End'].notnull() & 
-        (filtered_books[f'{section.capitalize()} End'] != '0000-00-00 00:00:00')
-    ])
-    pending_books = len(filtered_books[
-        filtered_books[f'{section.capitalize()} Start'].isnull() | 
-        (filtered_books[f'{section.capitalize()} Start'] == '0000-00-00 00:00:00')
-    ])
+    
+    # Adjust completion and pending logic for cover section
+    if section == "cover":
+        completed_books = len(filtered_books[
+            filtered_books['Front Cover End'].notnull() & 
+            (filtered_books['Front Cover End'] != '0000-00-00 00:00:00') & 
+            filtered_books['Back Cover End'].notnull() & 
+            (filtered_books['Back Cover End'] != '0000-00-00 00:00:00')
+        ])
+        pending_books = len(filtered_books[
+            filtered_books['Formatting End'].notnull() & 
+            (filtered_books['Formatting End'] != '0000-00-00 00:00:00') & 
+            (filtered_books['Front Cover Start'].isnull() | (filtered_books['Front Cover Start'] == '0000-00-00 00:00:00')) & 
+            (filtered_books['Back Cover Start'].isnull() | (filtered_books['Back Cover Start'] == '0000-00-00 00:00:00'))
+        ])
+    else:
+        completed_books = len(filtered_books[
+            filtered_books[f'{section.capitalize()} End'].notnull() & 
+            (filtered_books[f'{section.capitalize()} End'] != '0000-00-00 00:00:00')
+        ])
+        pending_books = len(filtered_books[
+            filtered_books[f'{section.capitalize()} Start'].isnull() | 
+            (filtered_books[f'{section.capitalize()} Start'] == '0000-00-00 00:00:00')
+        ])
 
+    # Render UI
     col1, col2 = st.columns([11, 1], gap="large", vertical_alignment="bottom")
     with col1:
         st.subheader(f"Metrics of {selected_month}")
@@ -207,6 +275,7 @@ def render_metrics(books_df, selected_month, section):
         st.metric(f"{section.capitalize()} Done in {selected_month}", completed_books)
     with col3:
         st.metric(f"Pending in {selected_month}", pending_books)
+    
     return filtered_books
 
 # Helper function to fetch unique names (assumed to exist or can be added)
@@ -239,17 +308,16 @@ def get_worker_by(start, worker_by, worker_map=None):
         return worker, None
     return "Not Assigned", None
 
-###################################################################################################################
-#######################################  New Functions #############################################
-###################################################################################################################
-
 
 def fetch_book_details(book_id, conn):
     query = f"SELECT title FROM books WHERE book_id = {book_id}"
     return conn.query(query, show_spinner=False)
 
 
-# Reusable dialog for editing section details
+from streamlit import dialog
+from time import sleep
+from sqlalchemy.sql import text
+
 @st.dialog("Edit Section Details", width='large')
 def edit_section_dialog(book_id, conn, section):
     # Map section to display name and database columns
@@ -257,7 +325,14 @@ def edit_section_dialog(book_id, conn, section):
         "writing": {"display": "Writing", "by": "writing_by", "start": "writing_start", "end": "writing_end"},
         "proofreading": {"display": "Proofreading", "by": "proofreading_by", "start": "proofreading_start", "end": "proofreading_end"},
         "formatting": {"display": "Formatting", "by": "formatting_by", "start": "formatting_start", "end": "formatting_end", "extra": "book_pages"},
-        "cover": {"display": "Cover Page", "by": "cover_by", "start": "cover_start", "end": "cover_end"}
+        "cover": {
+            "display": "Cover Page",
+            "by": "cover_by",
+            "front_start": "front_cover_start",
+            "front_end": "front_cover_end",
+            "back_start": "back_cover_start",
+            "back_end": "back_cover_end"
+        }
     }
     
     config = section_config.get(section, section_config["writing"])  # Default to writing if section invalid
@@ -272,9 +347,21 @@ def edit_section_dialog(book_id, conn, section):
         st.markdown(f"### {display_name} Details for Book ID: {book_id}")
         st.warning("Book title not found.")
 
-    # Fetch current section data, including book_pages for formatting
-    extra_column = ", " + config["extra"] if "extra" in config else ""
-    query = f"SELECT {config['start']}, {config['end']}, {config['by']}{extra_column} FROM books WHERE book_id = {book_id}"
+    # Fetch current section data
+    if section == "cover":
+        query = f"""
+            SELECT 
+                front_cover_start AS 'Front Cover Start', 
+                front_cover_end AS 'Front Cover End', 
+                back_cover_start AS 'Back Cover Start', 
+                back_cover_end AS 'Back Cover End', 
+                cover_by AS 'Cover By'
+            FROM books 
+            WHERE book_id = {book_id}
+        """
+    else:
+        extra_column = ", " + config["extra"] if "extra" in config else ""
+        query = f"SELECT {config['start']}, {config['end']}, {config['by']}{extra_column} FROM books WHERE book_id = {book_id}"
     book_data = conn.query(query, show_spinner=False)
     current_data = book_data.iloc[0].to_dict() if not book_data.empty else {}
 
@@ -283,14 +370,42 @@ def edit_section_dialog(book_id, conn, section):
     options = ["Select Worker"] + names + ["Add New..."]
 
     # Initialize session state
-    for key in [f"{section}_by", f"{section}_start_date", f"{section}_start_time", f"{section}_end_date", f"{section}_end_time"]:
+    if section == "cover":
+        keys = [
+            f"{section}_by",
+            f"{section}_front_start_date", f"{section}_front_start_time",
+            f"{section}_front_end_date", f"{section}_front_end_time",
+            f"{section}_back_start_date", f"{section}_back_start_time",
+            f"{section}_back_end_date", f"{section}_back_end_time"
+        ]
+        defaults = {
+            "cover_by": current_data.get("Cover By", ""),
+            "cover_front_start_date": current_data.get("Front Cover Start", None),
+            "cover_front_start_time": current_data.get("Front Cover Start", None),
+            "cover_front_end_date": current_data.get("Front Cover End", None),
+            "cover_front_end_time": current_data.get("Front Cover End", None),
+            "cover_back_start_date": current_data.get("Back Cover Start", None),
+            "cover_back_start_time": current_data.get("Back Cover Start", None),
+            "cover_back_end_date": current_data.get("Back Cover End", None),
+            "cover_back_end_time": current_data.get("Back Cover End", None)
+        }
+    else:
+        keys = [
+            f"{section}_by",
+            f"{section}_start_date", f"{section}_start_time",
+            f"{section}_end_date", f"{section}_end_time"
+        ]
+        defaults = {
+            f"{section}_by": current_data.get(config["by"], ""),
+            f"{section}_start_date": current_data.get(config["start"], None),
+            f"{section}_start_time": current_data.get(config["start"], None),
+            f"{section}_end_date": current_data.get(config["end"], None),
+            f"{section}_end_time": current_data.get(config["end"], None)
+        }
+    
+    for key in keys:
         if f"{key}_{book_id}" not in st.session_state:
-            if "by" in key:
-                st.session_state[f"{key}_{book_id}"] = current_data.get(config["by"], "")
-            elif "start" in key:
-                st.session_state[f"{key}_{book_id}"] = current_data.get(config["start"], None)
-            else:  # end
-                st.session_state[f"{key}_{book_id}"] = current_data.get(config["end"], None)
+            st.session_state[f"{key}_{book_id}"] = defaults[key]
     
     # Initialize book_pages for formatting
     if section == "formatting" and f"book_pages_{book_id}" not in st.session_state:
@@ -331,44 +446,115 @@ def edit_section_dialog(book_id, conn, section):
                 placeholder=f"Enter new {display_name.lower()} worker name...",
                 label_visibility="collapsed"
             )
-            worker = new_worker.strip() if new_worker.strip() else None  # Only use if non-empty
+            worker = new_worker.strip() if new_worker.strip() else None
         else:
-            worker = selected_worker if selected_worker != "Select Worker" else None  # Reset to None if "Select Worker"
-        # Update session state only if a valid worker is selected or entered
+            worker = selected_worker if selected_worker != "Select Worker" else None
         if worker:
             st.session_state[f"{section}_by_{book_id}"] = worker
 
-        col1, col2 = st.columns(2, gap="medium")
-        with col1:
-            st.markdown(f'<div class="field-label">Start Date & Time</div>', unsafe_allow_html=True)
-            start_date = st.date_input(
-                "Start Date",
-                value=st.session_state[f"{section}_start_date_{book_id}"],
-                key=f"{section}_start_date_{book_id}",
-                label_visibility="collapsed",
-                help=f"When {display_name.lower()} began"
-            )
-            start_time = st.time_input(
-                "Start Time",
-                value=st.session_state[f"{section}_start_time_{book_id}"],
-                key=f"{section}_start_time_{book_id}",
-                label_visibility="collapsed"
-            )
-        with col2:
-            st.markdown(f'<div class="field-label">End Date & Time</div>', unsafe_allow_html=True)
-            end_date = st.date_input(
-                "End Date",
-                value=st.session_state[f"{section}_end_date_{book_id}"],
-                key=f"{section}_end_date_{book_id}",
-                label_visibility="collapsed",
-                help=f"When {display_name.lower()} was completed (leave blank if ongoing)"
-            )
-            end_time = st.time_input(
-                "End Time",
-                value=st.session_state[f"{section}_end_time_{book_id}"],
-                key=f"{section}_end_time_{book_id}",
-                label_visibility="collapsed"
-            )
+        if section == "cover":
+            # Front Cover
+            st.markdown('<div class="field-label">Front Cover</div>', unsafe_allow_html=True)
+            col1, col2 = st.columns(2, gap="medium")
+            with col1:
+                front_start_date = st.date_input(
+                    "Start Date",
+                    value=st.session_state[f"{section}_front_start_date_{book_id}"],
+                    key=f"{section}_front_start_date_{book_id}",
+                    label_visibility="collapsed",
+                    help="When front cover design began"
+                )
+                front_start_time = st.time_input(
+                    "Start Time",
+                    value=st.session_state[f"{section}_front_start_time_{book_id}"],
+                    key=f"{section}_front_start_time_{book_id}",
+                    label_visibility="collapsed"
+                )
+            with col2:
+                front_end_date = st.date_input(
+                    "End Date",
+                    value=st.session_state[f"{section}_front_end_date_{book_id}"],
+                    key=f"{section}_front_end_date_{book_id}",
+                    label_visibility="collapsed",
+                    help="When front cover design was completed"
+                )
+                front_end_time = st.time_input(
+                    "End Time",
+                    value=st.session_state[f"{section}_front_end_time_{book_id}"],
+                    key=f"{section}_front_end_time_{book_id}",
+                    label_visibility="collapsed"
+                )
+            
+            # Back Cover
+            st.markdown('<div class="field-label">Back Cover</div>', unsafe_allow_html=True)
+            col3, col4 = st.columns(2, gap="medium")
+            with col3:
+                back_start_date = st.date_input(
+                    "Start Date",
+                    value=st.session_state[f"{section}_back_start_date_{book_id}"],
+                    key=f"{section}_back_start_date_{book_id}",
+                    label_visibility="collapsed",
+                    help="When back cover design began"
+                )
+                back_start_time = st.time_input(
+                    "Start Time",
+                    value=st.session_state[f"{section}_back_start_time_{book_id}"],
+                    key=f"{section}_back_start_time_{book_id}",
+                    label_visibility="collapsed"
+                )
+            with col4:
+                back_end_date = st.date_input(
+                    "End Date",
+                    value=st.session_state[f"{section}_back_end_date_{book_id}"],
+                    key=f"{section}_back_end_date_{book_id}",
+                    label_visibility="collapsed",
+                    help="When back cover design was completed"
+                )
+                back_end_time = st.time_input(
+                    "End Time",
+                    value=st.session_state[f"{section}_back_end_time_{book_id}"],
+                    key=f"{section}_back_end_time_{book_id}",
+                    label_visibility="collapsed"
+                )
+            
+            front_start = f"{front_start_date} {front_start_time}" if front_start_date and front_start_time else None
+            front_end = f"{front_end_date} {front_end_time}" if front_end_date and front_end_time else None
+            back_start = f"{back_start_date} {back_start_time}" if back_start_date and back_start_time else None
+            back_end = f"{back_end_date} {back_end_time}" if back_end_date and back_end_time else None
+        else:
+            col1, col2 = st.columns(2, gap="medium")
+            with col1:
+                st.markdown(f'<div class="field-label">Start Date & Time</div>', unsafe_allow_html=True)
+                start_date = st.date_input(
+                    "Start Date",
+                    value=st.session_state[f"{section}_start_date_{book_id}"],
+                    key=f"{section}_start_date_{book_id}",
+                    label_visibility="collapsed",
+                    help=f"When {display_name.lower()} began"
+                )
+                start_time = st.time_input(
+                    "Start Time",
+                    value=st.session_state[f"{section}_start_time_{book_id}"],
+                    key=f"{section}_start_time_{book_id}",
+                    label_visibility="collapsed"
+                )
+            with col2:
+                st.markdown(f'<div class="field-label">End Date & Time</div>', unsafe_allow_html=True)
+                end_date = st.date_input(
+                    "End Date",
+                    value=st.session_state[f"{section}_end_date_{book_id}"],
+                    key=f"{section}_end_date_{book_id}",
+                    label_visibility="collapsed",
+                    help=f"When {display_name.lower()} was completed (leave blank if ongoing)"
+                )
+                end_time = st.time_input(
+                    "End Time",
+                    value=st.session_state[f"{section}_end_time_{book_id}"],
+                    key=f"{section}_end_time_{book_id}",
+                    label_visibility="collapsed"
+                )
+            start = f"{start_date} {start_time}" if start_date and start_time else None
+            end = f"{end_date} {end_time}" if end_date and end_time else None
 
         # Add Total Book Pages field for formatting only
         book_pages = None
@@ -383,9 +569,6 @@ def edit_section_dialog(book_id, conn, section):
                 help="Enter the total number of pages in the book"
             )
 
-        start = f"{start_date} {start_time}" if start_date and start_time else None
-        end = f"{end_date} {end_time}" if end_date and end_time else None
-
         col_save, col_cancel = st.columns([1, 1])
         with col_save:
             submit = st.form_submit_button("💾 Save and Close", use_container_width=True)
@@ -393,32 +576,56 @@ def edit_section_dialog(book_id, conn, section):
             cancel = st.form_submit_button("Cancel", use_container_width=True, type="secondary")
 
         if submit:
-            if start and end and start > end:
-                st.error("Start must be before End.")
+            if section == "cover":
+                if (front_start and front_end and front_start > front_end) or (back_start and back_end and back_start > back_end):
+                    st.error("Start must be before End for both front and back covers.")
+                else:
+                    with st.spinner(f"Saving {display_name} details..."):
+                        sleep(2)
+                        updates = {
+                            "front_cover_start": front_start,
+                            "front_cover_end": front_end,
+                            "back_cover_start": back_start,
+                            "back_cover_end": back_end,
+                            "cover_by": worker
+                        }
+                        with conn.session as session:
+                            set_clause = ", ".join([f"{key} = :{key}" for key in updates.keys()])
+                            query = f"UPDATE books SET {set_clause} WHERE book_id = :id"
+                            params = updates.copy()
+                            params["id"] = int(book_id)
+                            session.execute(text(query), params)
+                            session.commit()
+                        st.success(f"✔️ Updated {display_name} details")
+                        sleep(1)
+                        st.rerun()
             else:
-                with st.spinner(f"Saving {display_name} details..."):
-                    time.sleep(2)
-                    updates = {
-                        config["start"]: start,
-                        config["end"]: end,
-                        config["by"]: worker
-                    }
-                    if section == "formatting":
-                        updates["book_pages"] = book_pages
-                    
-                    with conn.session as session:
-                        set_clause = ", ".join([f"{key} = :{key}" for key in updates.keys()])
-                        query = f"UPDATE books SET {set_clause} WHERE book_id = :id"
-                        params = updates.copy()
-                        params["id"] = int(book_id)
-                        session.execute(text(query), params)
-                        session.commit()
-                    st.success(f"✔️ Updated {display_name} details")
-                    time.sleep(1)
-                    st.rerun()
+                if start and end and start > end:
+                    st.error("Start must be before End.")
+                else:
+                    with st.spinner(f"Saving {display_name} details..."):
+                        sleep(2)
+                        updates = {
+                            config["start"]: start,
+                            config["end"]: end,
+                            config["by"]: worker
+                        }
+                        if section == "formatting":
+                            updates["book_pages"] = book_pages
+                        
+                        with conn.session as session:
+                            set_clause = ", ".join([f"{key} = :{key}" for key in updates.keys()])
+                            query = f"UPDATE books SET {set_clause} WHERE book_id = :id"
+                            params = updates.copy()
+                            params["id"] = int(book_id)
+                            session.execute(text(query), params)
+                            session.commit()
+                        st.success(f"✔️ Updated {display_name} details")
+                        sleep(1)
+                        st.rerun()
 
         elif cancel:
-            for key in [f"{section}_by", f"{section}_start_date", f"{section}_start_time", f"{section}_end_date", f"{section}_end_time"]:
+            for key in keys:
                 st.session_state.pop(f"{key}_{book_id}", None)
             if section == "formatting":
                 st.session_state.pop(f"book_pages_{book_id}", None)
@@ -513,6 +720,21 @@ st.markdown("""
         font-size: 12px;
         font-weight: normal;
     }
+    /* ... existing styles ... */
+    .status-completed {
+        background-color: #E8F5E9;
+        color: #4CAF50;
+        font-weight: bold;
+    }
+    .status-badge-green {
+        background-color: #E8F5E9;
+        color: #4CAF50;
+        padding: 4px 8px;
+        border-radius: 12px;
+        font-weight: bold;
+        display: inline-flex;
+        align-items: center;
+    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -523,20 +745,41 @@ def render_table(books_df, title, column_sizes, color, section, role, is_running
         cont = st.container(border=True)
         with cont:
             count = len(books_df)
-            badge_color = 'yellow' if is_running else 'red'
+            if "Running" in title:
+                badge_color = 'yellow'
+            elif "Pending" in title:
+                badge_color = 'red'
+            else:  # Completed
+                badge_color = 'green'
             st.markdown(f"<h5><span class='status-badge-{badge_color}'>{title} Books <span class='badge-count'>{count}</span></span></h5>", 
                         unsafe_allow_html=True)
             st.markdown('<div class="header-row">', unsafe_allow_html=True)
             
+            # Base columns
             columns = ["Book ID", "Title", "Date", "Status"]
+            # Role-specific additional columns
             if role == "proofreader":
                 columns.extend(["Writing End", "Writing By"])
             elif role == "formatter":
-                columns.extend(["Proofreading End"])
+                columns.extend(["Proofreading End", "Total Book Pages"])
+            elif role == "cover_designer":
+                columns.extend(["Apply ISBN", "ISBN"])  # No "Author Details"
+            # Adjust columns based on table type
             if is_running:
-                columns.extend([f"{section.capitalize()} Start", f"{section.capitalize()} By", "Action"])
-            else:
-                columns.append("Action")
+                if role == "cover_designer":
+                    columns.extend(["Front Cover Start", "Back Cover Start", "Cover By", "Action", "Details"])
+                else:
+                    columns.extend([f"{section.capitalize()} Start", f"{section.capitalize()} By", "Action"])
+            elif "Pending" in title:
+                if role == "cover_designer":
+                    columns.extend(["Action", "Details"])
+                else:
+                    columns.append("Action")
+            elif "Completed" in title:
+                if role == "cover_designer":
+                    columns.extend(["Front Cover End", "Back Cover End"])
+                else:
+                    columns.append(f"{section.capitalize()} End")
             
             col_configs = st.columns(column_sizes[:len(columns)])
             for i, col in enumerate(columns):
@@ -565,18 +808,47 @@ def render_table(books_df, title, column_sizes, color, section, role, is_running
                     st.write(row['Date'].strftime('%Y-%m-%d') if pd.notnull(row['Date']) else "-")
                 col_idx += 1
                 with col_configs[col_idx]:
-                    status, days = get_status(row[f'{section.capitalize()} Start'], row[f'{section.capitalize()} End'], current_date)
-                    days_since = get_days_since_enrolled(row['Date'], current_date)
-                    status_html = f'<span class="pill status-{"pending" if status == "Pending" else "running"}">{status}'
-                    if days is not None:
-                        status_html += f' {days}d'
-                    status_html += '</span>'
-                    if not is_running and days_since is not None:
-                        status_html += f'<span class="since-enrolled">{days_since}d</span>'
+                    if role == "cover_designer":
+                        if pd.notnull(row['Front Cover End']) and pd.notnull(row['Back Cover End']):
+                            status = "Completed"
+                            days_ago = (current_date - row['Front Cover End'].date()).days if pd.notnull(row['Front Cover End']) else None
+                            status_html = f'<span class="pill status-completed">{status}'
+                            if days_ago is not None:
+                                status_html += f' ({days_ago}d ago)'
+                            status_html += '</span>'
+                        elif pd.notnull(row['Front Cover Start']) or pd.notnull(row['Back Cover Start']):
+                            status = "Running"
+                            start_date = row['Front Cover Start'] if pd.notnull(row['Front Cover Start']) else row['Back Cover Start']
+                            days = (current_date - start_date.date()).days if pd.notnull(start_date) else None
+                            status_html = f'<span class="pill status-running">{status}'
+                            if days is not None:
+                                status_html += f' {days}d'
+                            status_html += '</span>'
+                        else:
+                            status = "Pending"
+                            days_since = get_days_since_enrolled(row['Date'], current_date)
+                            status_html = f'<span class="pill status-pending">{status}'
+                            if days_since is not None:
+                                status_html += f'<span class="since-enrolled">{days_since}d</span>'
+                            status_html += '</span>'
+                    else:
+                        status, days = get_status(row[f'{section.capitalize()} Start'], row[f'{section.capitalize()} End'], current_date)
+                        days_since = get_days_since_enrolled(row['Date'], current_date)
+                        status_html = f'<span class="pill status-{"pending" if status == "Pending" else "running" if status == "Running" else "completed"}">{status}'
+                        if days is not None and status == "Running":
+                            status_html += f' {days}d'
+                        elif "Completed" in title:
+                            end_date = row[f'{section.capitalize()} End']
+                            days_ago = (current_date - end_date.date()).days if pd.notnull(end_date) else None
+                            if days_ago is not None:
+                                status_html += f' ({days_ago}d ago)'
+                        elif not is_running and days_since is not None:
+                            status_html += f'<span class="since-enrolled">{days_since}d</span>'
+                        status_html += '</span>'
                     st.markdown(status_html, unsafe_allow_html=True)
                 col_idx += 1
                 
-                # Role-specific columns with NaT handling
+                # Role-specific columns
                 if role == "proofreader":
                     with col_configs[col_idx]:
                         writing_end = row['Writing End']
@@ -594,49 +866,117 @@ def render_table(books_df, title, column_sizes, color, section, role, is_running
                         value = proofreading_end.strftime('%Y-%m-%d') if not pd.isna(proofreading_end) and proofreading_end != '0000-00-00 00:00:00' else "-"
                         st.markdown(f'<span>{value}</span>', unsafe_allow_html=True)
                     col_idx += 1
+                    with col_configs[col_idx]:
+                        book_pages = row['Total Book Pages']
+                        value = str(book_pages) if pd.notnull(book_pages) and book_pages != 0 else "-"
+                        st.markdown(f'<span>{value}</span>', unsafe_allow_html=True)
+                    col_idx += 1
+                elif role == "cover_designer":
+                    with col_configs[col_idx]:
+                        apply_isbn = row['Apply ISBN']
+                        value = "Yes" if pd.notnull(apply_isbn) and apply_isbn else "No"
+                        st.markdown(f'<span>{value}</span>', unsafe_allow_html=True)
+                    col_idx += 1
+                    with col_configs[col_idx]:
+                        isbn = row['ISBN']
+                        value = isbn if pd.notnull(isbn) and isbn else "-"
+                        st.markdown(f'<span>{value}</span>', unsafe_allow_html=True)
+                    col_idx += 1
                 
                 # Running-specific columns
                 if is_running and user_role == role:
-                    with col_configs[col_idx]:
-                        start = row[f'{section.capitalize()} Start']
-                        if pd.notnull(start) and start != '0000-00-00 00:00:00':
-                            st.markdown(f'<span class="pill section-start-date">{start.strftime("%d %B %Y")}</span>', 
-                                        unsafe_allow_html=True)
-                        else:
-                            st.markdown('<span class="pill section-start-not">Not started</span>', unsafe_allow_html=True)
-                    col_idx += 1
-                    with col_configs[col_idx]:
-                        worker, worker_idx = get_worker_by(row[f'{section.capitalize()} Start'], 
-                                                          row[f'{section.capitalize()} By'], worker_map)
-                        class_name = f"worker-by-{worker_idx}" if worker_idx is not None else "worker-by-not"
-                        st.markdown(f'<span class="pill {class_name}">{worker}</span>', unsafe_allow_html=True)
-                    col_idx += 1
-                    with col_configs[col_idx]:
-                        if st.button("Edit", key=f"edit_{section}_{row['Book ID']}"):
-                            edit_section_dialog(row['Book ID'], conn, section)
-                elif not is_running and user_role == role:
-                    with col_configs[col_idx]:
-                        if st.button("Edit", key=f"edit_{section}_{row['Book ID']}"):
-                            edit_section_dialog(row['Book ID'], conn, section)
+                    if role == "cover_designer":
+                        with col_configs[col_idx]:
+                            front_start = row['Front Cover Start']
+                            value = front_start.strftime('%Y-%m-%d') if not pd.isna(front_start) and front_start != '0000-00-00 00:00:00' else "-"
+                            st.markdown(f'<span>{value}</span>', unsafe_allow_html=True)
+                        col_idx += 1
+                        with col_configs[col_idx]:
+                            back_start = row['Back Cover Start']
+                            value = back_start.strftime('%Y-%m-%d') if not pd.isna(back_start) and back_start != '0000-00-00 00:00:00' else "-"
+                            st.markdown(f'<span>{value}</span>', unsafe_allow_html=True)
+                        col_idx += 1
+                        with col_configs[col_idx]:
+                            worker = row['Cover By']
+                            value = worker if pd.notnull(worker) else "Not Assigned"
+                            st.markdown(f'<span class="pill worker-by-not">{value}</span>', unsafe_allow_html=True)
+                        col_idx += 1
+                        with col_configs[col_idx]:
+                            if st.button("Edit", key=f"edit_{section}_{row['Book ID']}"):
+                                edit_section_dialog(row['Book ID'], conn, section)
+                        col_idx += 1
+                        with col_configs[col_idx]:
+                            if st.button("Details", key=f"details_{section}_{row['Book ID']}"):
+                                show_author_details_dialog(row['Book ID'])  # Open dialog
+                    else:
+                        with col_configs[col_idx]:
+                            start = row[f'{section.capitalize()} Start']
+                            if pd.notnull(start) and start != '0000-00-00 00:00:00':
+                                st.markdown(f'<span class="pill section-start-date">{start.strftime("%d %B %Y")}</span>', unsafe_allow_html=True)
+                            else:
+                                st.markdown('<span class="pill section-start-not">Not started</span>', unsafe_allow_html=True)
+                        col_idx += 1
+                        with col_configs[col_idx]:
+                            worker, worker_idx = get_worker_by(row[f'{section.capitalize()} Start'], 
+                                                              row[f'{section.capitalize()} By'], worker_map)
+                            class_name = f"worker-by-{worker_idx}" if worker_idx is not None else "worker-by-not"
+                            st.markdown(f'<span class="pill {class_name}">{worker}</span>', unsafe_allow_html=True)
+                        col_idx += 1
+                        with col_configs[col_idx]:
+                            if st.button("Edit", key=f"edit_{section}_{row['Book ID']}"):
+                                edit_section_dialog(row['Book ID'], conn, section)
+                # Pending-specific column
+                elif "Pending" in title and user_role == role:
+                    if role == "cover_designer":
+                        with col_configs[col_idx]:
+                            if st.button("Edit", key=f"edit_{section}_{row['Book ID']}"):
+                                edit_section_dialog(row['Book ID'], conn, section)
+                        col_idx += 1
+                        with col_configs[col_idx]:
+                            if st.button("Details", key=f"details_{section}_{row['Book ID']}"):
+                                show_author_details_dialog(row['Book ID'])  # Open dialog
+                    else:
+                        with col_configs[col_idx]:
+                            if st.button("Edit", key=f"edit_{section}_{row['Book ID']}"):
+                                edit_section_dialog(row['Book ID'], conn, section)
+                # Completed-specific column
+                elif "Completed" in title:
+                    if role == "cover_designer":
+                        with col_configs[col_idx]:
+                            front_end = row['Front Cover End']
+                            value = front_end.strftime('%Y-%m-%d') if not pd.isna(front_end) and front_end != '0000-00-00 00:00:00' else "-"
+                            st.markdown(f'<span>{value}</span>', unsafe_allow_html=True)
+                        col_idx += 1
+                        with col_configs[col_idx]:
+                            back_end = row['Back Cover End']
+                            value = back_end.strftime('%Y-%m-%d') if not pd.isna(back_end) and back_end != '0000-00-00 00:00:00' else "-"
+                            st.markdown(f'<span>{value}</span>', unsafe_allow_html=True)
+                        col_idx += 1
+                    else:
+                        with col_configs[col_idx]:
+                            end_date = row[f'{section.capitalize()} End']
+                            value = end_date.strftime('%Y-%m-%d') if not pd.isna(end_date) and end_date != '0000-00-00 00:00:00' else "-"
+                            st.markdown(f'<span>{value}</span>', unsafe_allow_html=True)
+                        col_idx += 1
 
 # --- Section Configuration ---
 sections = {
-    "writing": {"role": "writer", "color": "green"},
-    "proofreading": {"role": "proofreader", "color": "blue"},
-    "formatting": {"role": "formatter", "color": "purple"},
-    "cover": {"role": "cover_designer", "color": "orange"}
+    "writing": {"role": "writer", "color": "unused"},
+    "proofreading": {"role": "proofreader", "color": "unused"},
+    "formatting": {"role": "formatter", "color": "unused"},
+    "cover": {"role": "cover_designer", "color": "unused"}
 }
 
 # --- Column Sizes (Adjusted for New Columns) ---
 column_sizes_running = [0.7, 5.5, 1, 1, 1.2, 1.2, 1, 1, 1]  # Adjusted for proofreader/formatter extras
 column_sizes_pending = [0.7, 5.5, 1, 1, 1.2, 1.2, 1]  # Adjusted for proofreader/formatter extras
+column_sizes_completed = [0.7, 5.5, 1, 1, 1.2, 1.2, 1]  # 7 elements: Book ID, Title, Date, Status, Role-specific (2), End Date
 
 for section, config in sections.items():
     if user_role == config["role"] or user_role == "admin":
         st.session_state['section'] = section
         books_df = fetch_books(months_back=4, section=section)
         
-        # Filter books based on section dependencies
         if section == "writing":
             running_books = books_df[
                 books_df['Writing Start'].notnull() & 
@@ -644,6 +984,9 @@ for section, config in sections.items():
             ]
             pending_books = books_df[
                 books_df['Writing Start'].isnull()
+            ]
+            completed_books = books_df[
+                books_df['Writing End'].notnull()
             ]
         elif section == "proofreading":
             running_books = books_df[
@@ -654,6 +997,9 @@ for section, config in sections.items():
                 books_df['Writing End'].notnull() & 
                 books_df['Proofreading Start'].isnull()
             ]
+            completed_books = books_df[
+                books_df['Proofreading End'].notnull()
+            ]
         elif section == "formatting":
             running_books = books_df[
                 books_df['Formatting Start'].notnull() & 
@@ -663,22 +1009,40 @@ for section, config in sections.items():
                 books_df['Proofreading End'].notnull() & 
                 books_df['Formatting Start'].isnull()
             ]
+            completed_books = books_df[
+                books_df['Formatting End'].notnull()
+            ]
         elif section == "cover":
             running_books = books_df[
-                books_df['Cover Start'].notnull() & 
-                books_df['Cover End'].isnull()
+                ((books_df['Front Cover Start'].notnull() & books_df['Front Cover End'].isnull()) |
+                 (books_df['Back Cover Start'].notnull() & books_df['Back Cover End'].isnull()))
             ]
             pending_books = books_df[
-                books_df['Formatting End'].notnull() & 
-                books_df['Cover Start'].isnull()
+                books_df['Front Cover Start'].isnull() & 
+                books_df['Back Cover Start'].isnull()
+            ]
+            completed_books = books_df[
+                books_df['Front Cover End'].notnull() & 
+                books_df['Back Cover End'].notnull()
             ]
         
-        # Render UI components
+        # Define column sizes dynamically
+        if section == "cover":
+            column_sizes_running = [0.7, 5.5, 1, 1, 1, 1, 2, 1, 1, 1, 1]  # 11 columns for Cover Running
+            column_sizes_pending = [0.7, 5.5, 1, 1, 1, 1, 2, 1, 1]  # 9 columns for Cover Pending
+            column_sizes_completed = [0.7, 5.5, 1, 1, 1, 1, 2, 1, 1]  # 9 columns for Cover Completed
+        else:
+            column_sizes_running = [0.7, 5.5, 1, 1, 1.2, 1.2, 1, 1, 1]  # Adjusted for proofreader/formatter extras
+            column_sizes_pending = [0.7, 5.5, 1, 1, 1.2, 1.2, 1]  # Adjusted for proofreader/formatter extras
+            column_sizes_completed = [0.7, 5.5, 1, 1, 1.2, 1.2, 1]
+        
         selected_month = render_month_selector(books_df)
-        st.caption(f"Welcome: {user_role}")
         render_metrics(books_df, selected_month, section)
         render_table(running_books, f"{section.capitalize()} Running", column_sizes_running, config["color"], section, config["role"], is_running=True)
         render_table(pending_books, f"{section.capitalize()} Pending", column_sizes_pending, config["color"], section, config["role"], is_running=False)
+        if st.button(f"Show {section.capitalize()} Completed Books", key=f"show_{section}_completed"):
+            render_table(completed_books, f"{section.capitalize()} Completed", column_sizes_completed, config["color"], section, config["role"], is_running=False)
+
 
 
 
