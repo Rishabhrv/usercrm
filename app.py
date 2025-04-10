@@ -110,8 +110,6 @@ def connect_db():
 # Connect to MySQL
 conn = connect_db()
 
-from datetime import datetime, timedelta
-
 def fetch_books(months_back: int = 4, section: str = "writing") -> pd.DataFrame:
     conn = connect_db()
     cutoff_date = datetime.now().date() - timedelta(days=30 * months_back)
@@ -119,18 +117,36 @@ def fetch_books(months_back: int = 4, section: str = "writing") -> pd.DataFrame:
     
     section_columns = {
         "writing": {
-            "base": ["writing_by AS 'Writing By'", "writing_start AS 'Writing Start'", "writing_end AS 'Writing End'"],
+            "base": [
+                "writing_by AS 'Writing By'", 
+                "writing_start AS 'Writing Start'", 
+                "writing_end AS 'Writing End'",
+                "book_pages AS 'Number of Book Pages'"  # Added here for Completed table
+            ],
             "extra": [],
             "publish_filter": "AND is_publish_only = 0"
         },
         "proofreading": {
-            "base": ["proofreading_by AS 'Proofreading By'", "proofreading_start AS 'Proofreading Start'", "proofreading_end AS 'Proofreading End'"],
-            "extra": ["writing_end AS 'Writing End'", "writing_by AS 'Writing By'"],
+            "base": [
+                "proofreading_by AS 'Proofreading By'", 
+                "proofreading_start AS 'Proofreading Start'", 
+                "proofreading_end AS 'Proofreading End'"
+            ],
+            "extra": [
+                "writing_end AS 'Writing End'", 
+                "writing_by AS 'Writing By'",
+                "book_pages AS 'Number of Book Pages'"  # Added here for Pending and Completed
+            ],
             "publish_filter": ""
         },
         "formatting": {
-            "base": ["formatting_by AS 'Formatting By'", "formatting_start AS 'Formatting Start'", "formatting_end AS 'Formatting End'"],
-            "extra": ["proofreading_end AS 'Proofreading End'", "book_pages AS 'Total Book Pages'"],
+            "base": [
+                "formatting_by AS 'Formatting By'", 
+                "formatting_start AS 'Formatting Start'", 
+                "formatting_end AS 'Formatting End'",
+                "book_pages AS 'Number of Book Pages'"  # Moved from extra, renamed
+            ],
+            "extra": ["proofreading_end AS 'Proofreading End'"],
             "publish_filter": ""
         },
         "cover": {
@@ -180,7 +196,7 @@ def fetch_books(months_back: int = 4, section: str = "writing") -> pd.DataFrame:
             FROM books 
             WHERE date >= '{cutoff_date_str}'
             {publish_filter}
-            ORDER BY date DESC  # Fixed: Removed 'b.' since no alias is used
+            ORDER BY date DESC
         """
     
     df = conn.query(query, show_spinner=False)
@@ -190,7 +206,8 @@ def fetch_books(months_back: int = 4, section: str = "writing") -> pd.DataFrame:
 def fetch_author_details(book_id):
     conn = connect_db()
     query = f"""
-        SELECT 
+        SELECT
+            ba.author_id AS 'Author ID', 
             a.name AS 'Author Name',
             ba.author_position AS 'Position',
             ba.photo_recive AS 'Photo Received',
@@ -206,14 +223,101 @@ from streamlit import experimental_dialog
 
 @st.dialog("Author Details", width='large')
 def show_author_details_dialog(book_id):
+    # Fetch book details (title and ISBN)
+    conn = connect_db()
+    book_query = f"SELECT title, isbn FROM books WHERE book_id = {book_id}"
+    book_data = conn.query(book_query, show_spinner=False)
+    book_title = book_data.iloc[0]['title'] if not book_data.empty else "Unknown Title"
+    isbn = book_data.iloc[0]['isbn'] if not book_data.empty and pd.notnull(book_data.iloc[0]['isbn']) else "Not Assigned"
+
+    # Fetch author details
     author_details_df = fetch_author_details(book_id)
+    
+    # Custom CSS for table styling
+    st.markdown("""
+        <style>
+        .dialog-header {
+            font-size: 20px;
+            color: #4CAF50;
+            margin-bottom: 10px;
+            font-weight: bold;
+        }
+        .info-label {
+            font-weight: bold;
+            color: #333;
+            margin-top: 10px;
+            margin-bottom: 5px;
+        }
+        .info-value {
+            padding: 5px 10px;
+            border-radius: 5px;
+            background-color: #F5F5F5;
+            display: inline-block;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 20px;
+        }
+        th {
+            background-color: #4CAF50;
+            color: white;
+            padding: 10px;
+            text-align: left;
+            font-weight: bold;
+        }
+        td {
+            padding: 10px;
+            border-bottom: 1px solid #E0E0E0;
+        }
+        .pill-yes {
+            background-color: #C8E6C9;
+            color: #2E7D32;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 12px;
+        }
+        .pill-no {
+            background-color: #E0E0E0;
+            color: #616161;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 12px;
+        }
+        .close-button {
+            margin-top: 20px;
+            width: 100%;
+        }
+        </style>
+    """, unsafe_allow_html=True)
+
+    # Header
+    st.markdown(f'<div class="dialog-header">Book ID: {book_id} - {book_title}</div>', unsafe_allow_html=True)
+
+    # ISBN Display
+    st.markdown('<div class="info-label">ISBN</div>', unsafe_allow_html=True)
+    st.markdown(f'<span class="info-value">{isbn}</span>', unsafe_allow_html=True)
+
+    # Author Details Table
     if not author_details_df.empty:
-        st.table(author_details_df)
+        # Prepare HTML table
+        table_html = '<table><tr><th>Author ID</th><th>Author Name</th><th>Position</th><th>Photo Received</th><th>Details Received</th></tr>'
+        for _, row in author_details_df.iterrows():
+            photo_class = "pill-yes" if row["Photo Received"] else "pill-no"
+            details_class = "pill-yes" if row["Details Sent"] else "pill-no"
+            table_html += (
+                f'<tr>'
+                f'<td>{row["Author ID"]}</td>'
+                f'<td>{row["Author Name"]}</td>'
+                f'<td>{row["Position"]}</td>'
+                f'<td><span class="{photo_class}">{"Yes" if row["Photo Received"] else "No"}</span></td>'
+                f'<td><span class="{details_class}">{"Yes" if row["Details Sent"] else "No"}</span></td>'
+                f'</tr>'
+            )
+        table_html += '</table>'
+        st.markdown(table_html, unsafe_allow_html=True)
     else:
-        st.write("No author details available.")
-    if st.button("Close"):
-        st.session_state[f"dialog_open_{book_id}"] = False
-        st.rerun()
+        st.warning("No author details available.")
 
 # --- Reusable Month Selector ---
 def render_month_selector(books_df):
@@ -324,7 +428,7 @@ def edit_section_dialog(book_id, conn, section):
     section_config = {
         "writing": {"display": "Writing", "by": "writing_by", "start": "writing_start", "end": "writing_end"},
         "proofreading": {"display": "Proofreading", "by": "proofreading_by", "start": "proofreading_start", "end": "proofreading_end"},
-        "formatting": {"display": "Formatting", "by": "formatting_by", "start": "formatting_start", "end": "formatting_end", "extra": "book_pages"},
+        "formatting": {"display": "Formatting", "by": "formatting_by", "start": "formatting_start", "end": "formatting_end"},
         "cover": {
             "display": "Cover Page",
             "by": "cover_by",
@@ -338,12 +442,15 @@ def edit_section_dialog(book_id, conn, section):
     config = section_config.get(section, section_config["writing"])  # Default to writing if section invalid
     display_name = config["display"]
 
-    # Fetch book title
+    # Fetch book title and current book_pages
     book_details = fetch_book_details(book_id, conn)
     if not book_details.empty:
         book_title = book_details.iloc[0]['title']
+        current_book_pages = book_details.iloc[0].get('book_pages', 0)  # Fetch existing book_pages
         st.markdown(f"<h3 style='color:#4CAF50;'>{book_id} : {book_title}</h3>", unsafe_allow_html=True)
     else:
+        book_title = "Unknown Title"
+        current_book_pages = 0
         st.markdown(f"### {display_name} Details for Book ID: {book_id}")
         st.warning("Book title not found.")
 
@@ -360,8 +467,7 @@ def edit_section_dialog(book_id, conn, section):
             WHERE book_id = {book_id}
         """
     else:
-        extra_column = ", " + config["extra"] if "extra" in config else ""
-        query = f"SELECT {config['start']}, {config['end']}, {config['by']}{extra_column} FROM books WHERE book_id = {book_id}"
+        query = f"SELECT {config['start']}, {config['end']}, {config['by']}, book_pages FROM books WHERE book_id = {book_id}"
     book_data = conn.query(query, show_spinner=False)
     current_data = book_data.iloc[0].to_dict() if not book_data.empty else {}
 
@@ -393,24 +499,22 @@ def edit_section_dialog(book_id, conn, section):
         keys = [
             f"{section}_by",
             f"{section}_start_date", f"{section}_start_time",
-            f"{section}_end_date", f"{section}_end_time"
+            f"{section}_end_date", f"{section}_end_time",
+            f"book_pages"  # Add book_pages to keys for all non-cover sections
         ]
         defaults = {
             f"{section}_by": current_data.get(config["by"], ""),
             f"{section}_start_date": current_data.get(config["start"], None),
             f"{section}_start_time": current_data.get(config["start"], None),
             f"{section}_end_date": current_data.get(config["end"], None),
-            f"{section}_end_time": current_data.get(config["end"], None)
+            f"{section}_end_time": current_data.get(config["end"], None),
+            f"book_pages": current_data.get("book_pages", current_book_pages)
         }
     
     for key in keys:
         if f"{key}_{book_id}" not in st.session_state:
             st.session_state[f"{key}_{book_id}"] = defaults[key]
     
-    # Initialize book_pages for formatting
-    if section == "formatting" and f"book_pages_{book_id}" not in st.session_state:
-        st.session_state[f"book_pages_{book_id}"] = current_data.get("book_pages", 0)
-
     # Custom CSS
     st.markdown("""
         <style>
@@ -556,9 +660,8 @@ def edit_section_dialog(book_id, conn, section):
             start = f"{start_date} {start_time}" if start_date and start_time else None
             end = f"{end_date} {end_time}" if end_date and end_time else None
 
-        # Add Total Book Pages field for formatting only
-        book_pages = None
-        if section == "formatting":
+        # Add Total Book Pages field for writing, proofreading, and formatting
+        if section in ["writing", "proofreading", "formatting"]:
             st.markdown('<div class="field-label">Total Book Pages</div>', unsafe_allow_html=True)
             book_pages = st.number_input(
                 "Total Book Pages",
@@ -608,11 +711,11 @@ def edit_section_dialog(book_id, conn, section):
                         updates = {
                             config["start"]: start,
                             config["end"]: end,
-                            config["by"]: worker
+                            config["by"]: worker,
+                            "book_pages": book_pages if section in ["writing", "proofreading", "formatting"] else None
                         }
-                        if section == "formatting":
-                            updates["book_pages"] = book_pages
-                        
+                        # Remove None values from updates
+                        updates = {k: v for k, v in updates.items() if v is not None}
                         with conn.session as session:
                             set_clause = ", ".join([f"{key} = :{key}" for key in updates.keys()])
                             query = f"UPDATE books SET {set_clause} WHERE book_id = :id"
@@ -627,8 +730,6 @@ def edit_section_dialog(book_id, conn, section):
         elif cancel:
             for key in keys:
                 st.session_state.pop(f"{key}_{book_id}", None)
-            if section == "formatting":
-                st.session_state.pop(f"book_pages_{book_id}", None)
             st.rerun()
 
 # --- Updated CSS ---
@@ -686,6 +787,14 @@ st.markdown("""
         background-color: #FFEBEE;
         color: #F44336;
         font-weight: bold;
+    }
+    .apply-isbn-yes {
+    background-color: #C8E6C9; /* Light green */
+    color: #2E7D32; /* Dark green text */
+    }
+    .apply-isbn-no {
+        background-color: #E0E0E0; /* Light gray */
+        color: #616161; /* Dark gray text */
     }
     .status-running {
         background-color: #FFFDE7;
@@ -759,11 +868,22 @@ def render_table(books_df, title, column_sizes, color, section, role, is_running
             columns = ["Book ID", "Title", "Date", "Status"]
             # Role-specific additional columns
             if role == "proofreader":
-                columns.extend(["Writing End", "Writing By"])
+                columns.append("Writing By")
+                if not is_running:
+                    columns.append("Writing End")
+                if "Pending" in title or "Completed" in title:
+                    columns.append("Book Pages")
             elif role == "formatter":
-                columns.extend(["Proofreading End", "Total Book Pages"])
+                if not is_running:
+                    columns.append("Proofreading End")
+                if "Pending" in title or "Completed" in title:
+                    columns.append("Book Pages")
             elif role == "cover_designer":
-                columns.extend(["Apply ISBN", "ISBN"])  # No "Author Details"
+                if "Pending" in title:  # Only include Apply ISBN in Pending
+                    columns.append("Apply ISBN")
+            elif role == "writer":  # Assuming "writing" access uses "writer" role
+                if "Completed" in title:
+                    columns.append("Book Pages")
             # Adjust columns based on table type
             if is_running:
                 if role == "cover_designer":
@@ -788,11 +908,18 @@ def render_table(books_df, title, column_sizes, color, section, role, is_running
             st.markdown('</div><div class="header-line"></div>', unsafe_allow_html=True)
 
             current_date = datetime.now().date()
-            if is_running and user_role == role:
+            # Worker maps for Proofreading By and Writing By (all tables)
+            if user_role == role:
                 unique_workers = [w for w in books_df[f'{section.capitalize()} By'].unique() if pd.notnull(w)]
                 worker_map = {worker: idx % 10 for idx, worker in enumerate(unique_workers)}
+                if role == "proofreader":
+                    unique_writing_workers = [w for w in books_df['Writing By'].unique() if pd.notnull(w)]
+                    writing_worker_map = {worker: idx % 10 for idx, worker in enumerate(unique_writing_workers)}
+                else:
+                    writing_worker_map = None
             else:
                 worker_map = None
+                writing_worker_map = None
 
             for _, row in books_df.iterrows():
                 col_configs = st.columns(column_sizes[:len(columns)])
@@ -851,37 +978,55 @@ def render_table(books_df, title, column_sizes, color, section, role, is_running
                 # Role-specific columns
                 if role == "proofreader":
                     with col_configs[col_idx]:
-                        writing_end = row['Writing End']
-                        value = writing_end.strftime('%Y-%m-%d') if not pd.isna(writing_end) and writing_end != '0000-00-00 00:00:00' else "-"
-                        st.markdown(f'<span>{value}</span>', unsafe_allow_html=True)
-                    col_idx += 1
-                    with col_configs[col_idx]:
                         writing_by = row['Writing By']
                         value = writing_by if pd.notnull(writing_by) and writing_by else "-"
-                        st.markdown(f'<span>{value}</span>', unsafe_allow_html=True)
+                        if writing_worker_map and value != "-":
+                            writing_idx = writing_worker_map.get(writing_by)
+                            class_name = f"worker-by-{writing_idx}" if writing_idx is not None else "worker-by-not"
+                            st.markdown(f'<span class="pill {class_name}">{value}</span>', unsafe_allow_html=True)
+                        else:
+                            st.markdown(f'<span>{value}</span>', unsafe_allow_html=True)
                     col_idx += 1
+                    if "Writing End" in columns:
+                        with col_configs[col_idx]:
+                            writing_end = row['Writing End']
+                            value = writing_end.strftime('%Y-%m-%d') if not pd.isna(writing_end) and writing_end != '0000-00-00 00:00:00' else "-"
+                            st.markdown(f'<span>{value}</span>', unsafe_allow_html=True)
+                        col_idx += 1
+                    if "Book Pages" in columns:
+                        with col_configs[col_idx]:
+                            book_pages = row['Number of Book Pages']
+                            value = str(book_pages) if pd.notnull(book_pages) and book_pages != 0 else "-"
+                            st.markdown(f'<span>{value}</span>', unsafe_allow_html=True)
+                        col_idx += 1
                 elif role == "formatter":
-                    with col_configs[col_idx]:
-                        proofreading_end = row['Proofreading End']
-                        value = proofreading_end.strftime('%Y-%m-%d') if not pd.isna(proofreading_end) and proofreading_end != '0000-00-00 00:00:00' else "-"
-                        st.markdown(f'<span>{value}</span>', unsafe_allow_html=True)
-                    col_idx += 1
-                    with col_configs[col_idx]:
-                        book_pages = row['Total Book Pages']
-                        value = str(book_pages) if pd.notnull(book_pages) and book_pages != 0 else "-"
-                        st.markdown(f'<span>{value}</span>', unsafe_allow_html=True)
-                    col_idx += 1
+                    if "Proofreading End" in columns:
+                        with col_configs[col_idx]:
+                            proofreading_end = row['Proofreading End']
+                            value = proofreading_end.strftime('%Y-%m-%d') if not pd.isna(proofreading_end) and proofreading_end != '0000-00-00 00:00:00' else "-"
+                            st.markdown(f'<span>{value}</span>', unsafe_allow_html=True)
+                        col_idx += 1
+                    if "Book Pages" in columns:
+                        with col_configs[col_idx]:
+                            book_pages = row['Number of Book Pages']
+                            value = str(book_pages) if pd.notnull(book_pages) and book_pages != 0 else "-"
+                            st.markdown(f'<span>{value}</span>', unsafe_allow_html=True)
+                        col_idx += 1
                 elif role == "cover_designer":
-                    with col_configs[col_idx]:
-                        apply_isbn = row['Apply ISBN']
-                        value = "Yes" if pd.notnull(apply_isbn) and apply_isbn else "No"
-                        st.markdown(f'<span>{value}</span>', unsafe_allow_html=True)
-                    col_idx += 1
-                    with col_configs[col_idx]:
-                        isbn = row['ISBN']
-                        value = isbn if pd.notnull(isbn) and isbn else "-"
-                        st.markdown(f'<span>{value}</span>', unsafe_allow_html=True)
-                    col_idx += 1
+                    if "Apply ISBN" in columns:  # Only in Pending
+                        with col_configs[col_idx]:
+                            apply_isbn = row['Apply ISBN']
+                            value = "Yes" if pd.notnull(apply_isbn) and apply_isbn else "No"
+                            class_name = "pill apply-isbn-yes" if value == "Yes" else "pill apply-isbn-no"
+                            st.markdown(f'<span class="{class_name}">{value}</span>', unsafe_allow_html=True)
+                        col_idx += 1
+                elif role == "writer":
+                    if "Book Pages" in columns:
+                        with col_configs[col_idx]:
+                            book_pages = row['Number of Book Pages']
+                            value = str(book_pages) if pd.notnull(book_pages) and book_pages != 0 else "-"
+                            st.markdown(f'<span>{value}</span>', unsafe_allow_html=True)
+                        col_idx += 1
                 
                 # Running-specific columns
                 if is_running and user_role == role:
@@ -907,7 +1052,7 @@ def render_table(books_df, title, column_sizes, color, section, role, is_running
                         col_idx += 1
                         with col_configs[col_idx]:
                             if st.button("Details", key=f"details_{section}_{row['Book ID']}"):
-                                show_author_details_dialog(row['Book ID'])  # Open dialog
+                                show_author_details_dialog(row['Book ID'])
                     else:
                         with col_configs[col_idx]:
                             start = row[f'{section.capitalize()} Start']
@@ -934,7 +1079,7 @@ def render_table(books_df, title, column_sizes, color, section, role, is_running
                         col_idx += 1
                         with col_configs[col_idx]:
                             if st.button("Details", key=f"details_{section}_{row['Book ID']}"):
-                                show_author_details_dialog(row['Book ID'])  # Open dialog
+                                show_author_details_dialog(row['Book ID'])
                     else:
                         with col_configs[col_idx]:
                             if st.button("Edit", key=f"edit_{section}_{row['Book ID']}"):
@@ -1014,9 +1159,13 @@ for section, config in sections.items():
             ]
         elif section == "cover":
             running_books = books_df[
-                ((books_df['Front Cover Start'].notnull() & books_df['Front Cover End'].isnull()) |
-                 (books_df['Back Cover Start'].notnull() & books_df['Back Cover End'].isnull()))
-            ]
+        (
+            (books_df['Front Cover Start'].notnull() | books_df['Back Cover Start'].notnull())
+            & 
+            (books_df['Front Cover End'].isnull() | books_df['Back Cover End'].isnull())
+        )
+    ]
+
             pending_books = books_df[
                 books_df['Front Cover Start'].isnull() & 
                 books_df['Back Cover Start'].isnull()
@@ -1025,16 +1174,30 @@ for section, config in sections.items():
                 books_df['Front Cover End'].notnull() & 
                 books_df['Back Cover End'].notnull()
             ]
-        
-        # Define column sizes dynamically
-        if section == "cover":
-            column_sizes_running = [0.7, 5.5, 1, 1, 1, 1, 2, 1, 1, 1, 1]  # 11 columns for Cover Running
-            column_sizes_pending = [0.7, 5.5, 1, 1, 1, 1, 2, 1, 1]  # 9 columns for Cover Pending
-            column_sizes_completed = [0.7, 5.5, 1, 1, 1, 1, 2, 1, 1]  # 9 columns for Cover Completed
-        else:
-            column_sizes_running = [0.7, 5.5, 1, 1, 1.2, 1.2, 1, 1, 1]  # Adjusted for proofreader/formatter extras
-            column_sizes_pending = [0.7, 5.5, 1, 1, 1.2, 1.2, 1]  # Adjusted for proofreader/formatter extras
+
+
+
+        if section == "writing":
+            column_sizes_running = [0.7, 5.5, 1, 1, 1.2, 1.2, 1]  
+            column_sizes_pending = [1, 6, 1, 1, 0.9] 
+            column_sizes_completed = [0.7, 6, 1, 1, 1, 1]
+
+        elif section == "proofreading":
+            column_sizes_running = [0.7, 5, 1, 1.2, 1.2, 1.2, 1.1, 1]  
+            column_sizes_pending = [0.7, 5.5, 1, 1.2, 1.2, 1.2, 1, 1] 
+            column_sizes_completed = [0.7, 5.5, 1, 1, 1.2, 1.2, 1, 1.2]    # Book ID, Title, Date, Status, Writing By, Writing End, Proofreading End
+
+        elif section == "formatting":
+            column_sizes_running = [0.7, 5.5, 1, 1, 1.2, 1.2, 1]  
+            column_sizes_pending = [0.7, 5.5, 1, 1, 1.2, 1, 1] 
             column_sizes_completed = [0.7, 5.5, 1, 1, 1.2, 1.2, 1]
+
+        elif section == "cover":
+            column_sizes_running = [0.7, 5, 1, 1.2, 1.5, 1.5, 1,1,1]  
+            column_sizes_pending = [0.7, 6, 1, 1, 1, 1, 1]  
+            column_sizes_completed = [0.7, 5.5, 1, 1.3, 1, 1] 
+
+
         
         selected_month = render_month_selector(books_df)
         render_metrics(books_df, selected_month, section)
