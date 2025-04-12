@@ -121,7 +121,8 @@ def fetch_books(months_back: int = 4, section: str = "writing") -> pd.DataFrame:
                 "writing_by AS 'Writing By'", 
                 "writing_start AS 'Writing Start'", 
                 "writing_end AS 'Writing End'",
-                "book_pages AS 'Number of Book Pages'"  # Added here for Completed table
+                "book_pages AS 'Number of Book Pages'",  # Added here for Completed table
+                "syllabus_path AS 'Syllabus Path'"
             ],
             "extra": [],
             "publish_filter": "AND is_publish_only = 0"
@@ -159,7 +160,12 @@ def fetch_books(months_back: int = 4, section: str = "writing") -> pd.DataFrame:
                 "apply_isbn AS 'Apply ISBN'", 
                 "isbn AS 'ISBN'"
             ],
-            "extra": ["formatting_end AS 'Formatting End'"],
+            "extra": [
+                "formatting_end AS 'Formatting End'",
+                # Aggregate photo_received and details_sent
+                "(SELECT MIN(ba.photo_recive) FROM book_authors ba WHERE ba.book_id = b.book_id) AS 'All Photos Received'",
+                "(SELECT MIN(ba.author_details_sent) FROM book_authors ba WHERE ba.book_id = b.book_id) AS 'All Details Sent'"
+            ],
             "publish_filter": ""
         }
     }
@@ -219,7 +225,6 @@ def fetch_author_details(book_id):
     df = conn.query(query, show_spinner=False)
     return df
 
-from streamlit import experimental_dialog
 
 @st.dialog("Author Details", width='large')
 def show_author_details_dialog(book_id):
@@ -418,9 +423,25 @@ def fetch_book_details(book_id, conn):
     return conn.query(query, show_spinner=False)
 
 
-from streamlit import dialog
 from time import sleep
 from sqlalchemy.sql import text
+
+@st.dialog("Rate User", width='large')
+def rate_user_dialog(book_id, conn):
+    # Fetch book title
+    book_details = fetch_book_details(book_id, conn)
+    if not book_details.empty:
+        book_title = book_details.iloc[0]['title']
+        st.markdown(f"<h3 style='color:#4CAF50;'>{book_id} : {book_title}</h3>", unsafe_allow_html=True)
+    else:
+        st.markdown(f"### Rate User for Book ID: {book_id}")
+        st.warning("Book title not found.")
+    
+    sentiment_mapping = ["one", "two", "three", "four", "five"]
+    selected = st.feedback("stars")
+    if selected is not None:
+        st.markdown(f"You selected {sentiment_mapping[selected]} star(s).")
+
 
 @st.dialog("Edit Section Details", width='large')
 def edit_section_dialog(book_id, conn, section):
@@ -873,21 +894,33 @@ def render_table(books_df, title, column_sizes, color, section, role, is_running
                     columns.append("Writing End")
                 if "Pending" in title or "Completed" in title:
                     columns.append("Book Pages")
+                if "Pending" in title:
+                    columns.append("Rating")
             elif role == "formatter":
                 if not is_running:
                     columns.append("Proofreading End")
                 if "Pending" in title or "Completed" in title:
                     columns.append("Book Pages")
             elif role == "cover_designer":
-                if "Pending" in title:  # Only include Apply ISBN in Pending
-                    columns.append("Apply ISBN")
-            elif role == "writer":  # Assuming "writing" access uses "writer" role
+                if "Pending" in title or is_running:
+                    columns.extend(["Apply ISBN", "Photo", "Details"])
+            elif role == "writer":
                 if "Completed" in title:
                     columns.append("Book Pages")
+                if "Pending" in title:
+                    columns.append("Syllabus")
             # Adjust columns based on table type
             if is_running:
                 if role == "cover_designer":
-                    columns.extend(["Front Cover Start", "Back Cover Start", "Cover By", "Action", "Details"])
+                    columns.extend(["Cover Status", "Cover By", "Action", "Details"])
+                elif role == "proofreader":
+                    columns.extend([f"{section.capitalize()} Start", f"{section.capitalize()} By"])
+                    columns.append("Rating")  # Rating just before Action
+                    columns.append("Action")
+                elif role == "writer":
+                    columns.extend([f"{section.capitalize()} Start", f"{section.capitalize()} By"])
+                    columns.append("Syllabus")  # Syllabus just before Action
+                    columns.append("Action")
                 else:
                     columns.extend([f"{section.capitalize()} Start", f"{section.capitalize()} By", "Action"])
             elif "Pending" in title:
@@ -999,6 +1032,11 @@ def render_table(books_df, title, column_sizes, color, section, role, is_running
                             value = str(book_pages) if pd.notnull(book_pages) and book_pages != 0 else "-"
                             st.markdown(f'<span>{value}</span>', unsafe_allow_html=True)
                         col_idx += 1
+                    if "Rating" in columns:
+                        with col_configs[col_idx]:
+                            if st.button("Rate", key=f"rate_{section}_{row['Book ID']}"):
+                                rate_user_dialog(row['Book ID'], conn)
+                        col_idx += 1
                 elif role == "formatter":
                     if "Proofreading End" in columns:
                         with col_configs[col_idx]:
@@ -1013,10 +1051,24 @@ def render_table(books_df, title, column_sizes, color, section, role, is_running
                             st.markdown(f'<span>{value}</span>', unsafe_allow_html=True)
                         col_idx += 1
                 elif role == "cover_designer":
-                    if "Apply ISBN" in columns:  # Only in Pending
+                    if "Apply ISBN" in columns:
                         with col_configs[col_idx]:
                             apply_isbn = row['Apply ISBN']
                             value = "Yes" if pd.notnull(apply_isbn) and apply_isbn else "No"
+                            class_name = "pill apply-isbn-yes" if value == "Yes" else "pill apply-isbn-no"
+                            st.markdown(f'<span class="{class_name}">{value}</span>', unsafe_allow_html=True)
+                        col_idx += 1
+                    if "Photo" in columns:
+                        with col_configs[col_idx]:
+                            photo_received = row['All Photos Received']
+                            value = "Yes" if pd.notnull(photo_received) and photo_received else "No"
+                            class_name = "pill apply-isbn-yes" if value == "Yes" else "pill apply-isbn-no"
+                            st.markdown(f'<span class="{class_name}">{value}</span>', unsafe_allow_html=True)
+                        col_idx += 1
+                    if "Details" in columns:
+                        with col_configs[col_idx]:
+                            details_sent = row['All Details Sent']
+                            value = "Yes" if pd.notnull(details_sent) and details_sent else "No"
                             class_name = "pill apply-isbn-yes" if value == "Yes" else "pill apply-isbn-no"
                             st.markdown(f'<span class="{class_name}">{value}</span>', unsafe_allow_html=True)
                         col_idx += 1
@@ -1027,19 +1079,50 @@ def render_table(books_df, title, column_sizes, color, section, role, is_running
                             value = str(book_pages) if pd.notnull(book_pages) and book_pages != 0 else "-"
                             st.markdown(f'<span>{value}</span>', unsafe_allow_html=True)
                         col_idx += 1
+                    if "Syllabus" in columns:
+                        with col_configs[col_idx]:
+                            syllabus_path = row['Syllabus Path']
+                            disabled = pd.isna(syllabus_path) or not syllabus_path
+                            if not disabled:
+                                with open(syllabus_path, "rb") as file:
+                                    st.download_button(
+                                        label=":material/download:",
+                                        data=file,
+                                        file_name=syllabus_path.split("/")[-1],
+                                        mime="application/pdf",
+                                        key=f"download_syllabus_{section}_{row['Book ID']}",
+                                        disabled=disabled
+                                    )
+                            else:
+                                st.download_button(
+                                    label=":material/download:",
+                                    data="",
+                                    file_name="no_syllabus.pdf",
+                                    mime="application/pdf",
+                                    key=f"download_syllabus_{section}_{row['Book ID']}",
+                                    disabled=disabled
+                                )
+                        col_idx += 1
                 
                 # Running-specific columns
                 if is_running and user_role == role:
                     if role == "cover_designer":
                         with col_configs[col_idx]:
                             front_start = row['Front Cover Start']
-                            value = front_start.strftime('%Y-%m-%d') if not pd.isna(front_start) and front_start != '0000-00-00 00:00:00' else "-"
-                            st.markdown(f'<span>{value}</span>', unsafe_allow_html=True)
-                        col_idx += 1
-                        with col_configs[col_idx]:
                             back_start = row['Back Cover Start']
-                            value = back_start.strftime('%Y-%m-%d') if not pd.isna(back_start) and back_start != '0000-00-00 00:00:00' else "-"
-                            st.markdown(f'<span>{value}</span>', unsafe_allow_html=True)
+                            if pd.notnull(front_start) and pd.notnull(back_start):
+                                status = "Both Running"
+                                class_name = "status-running"
+                            elif pd.notnull(front_start):
+                                status = "Back Pending"
+                                class_name = "status-pending"
+                            elif pd.notnull(back_start):
+                                status = "Front Pending"
+                                class_name = "status-pending"
+                            else:
+                                status = "Both Pending"
+                                class_name = "status-pending"
+                            st.markdown(f'<span class="pill {class_name}">{status}</span>', unsafe_allow_html=True)
                         col_idx += 1
                         with col_configs[col_idx]:
                             worker = row['Cover By']
@@ -1070,6 +1153,7 @@ def render_table(books_df, title, column_sizes, color, section, role, is_running
                         with col_configs[col_idx]:
                             if st.button("Edit", key=f"edit_{section}_{row['Book ID']}"):
                                 edit_section_dialog(row['Book ID'], conn, section)
+                        col_idx += 1
                 # Pending-specific column
                 elif "Pending" in title and user_role == role:
                     if role == "cover_designer":
@@ -1112,10 +1196,6 @@ sections = {
     "cover": {"role": "cover_designer", "color": "unused"}
 }
 
-# --- Column Sizes (Adjusted for New Columns) ---
-column_sizes_running = [0.7, 5.5, 1, 1, 1.2, 1.2, 1, 1, 1]  # Adjusted for proofreader/formatter extras
-column_sizes_pending = [0.7, 5.5, 1, 1, 1.2, 1.2, 1]  # Adjusted for proofreader/formatter extras
-column_sizes_completed = [0.7, 5.5, 1, 1, 1.2, 1.2, 1]  # 7 elements: Book ID, Title, Date, Status, Role-specific (2), End Date
 
 for section, config in sections.items():
     if user_role == config["role"] or user_role == "admin":
@@ -1159,13 +1239,12 @@ for section, config in sections.items():
             ]
         elif section == "cover":
             running_books = books_df[
-        (
-            (books_df['Front Cover Start'].notnull() | books_df['Back Cover Start'].notnull())
-            & 
-            (books_df['Front Cover End'].isnull() | books_df['Back Cover End'].isnull())
-        )
-    ]
-
+                (
+                    (books_df['Front Cover Start'].notnull() | books_df['Back Cover Start'].notnull())
+                    & 
+                    (books_df['Front Cover End'].isnull() | books_df['Back Cover End'].isnull())
+                )
+            ]
             pending_books = books_df[
                 books_df['Front Cover Start'].isnull() & 
                 books_df['Back Cover Start'].isnull()
@@ -1175,29 +1254,25 @@ for section, config in sections.items():
                 books_df['Back Cover End'].notnull()
             ]
 
+        # Sort Pending table by Date (oldest first)
+        pending_books = pending_books.sort_values(by='Date', ascending=True)
 
-
+        # Column sizes (adjusted to match previous updates)
         if section == "writing":
-            column_sizes_running = [0.7, 5.5, 1, 1, 1.2, 1.2, 1]  
-            column_sizes_pending = [1, 6, 1, 1, 0.9] 
-            column_sizes_completed = [0.7, 6, 1, 1, 1, 1]
-
+            column_sizes_running = [0.7, 5.5, 1, 1, 0.8, 1.2, 1, 1, 1]  
+            column_sizes_pending = [0.7, 5.5, 1, 1, 0.8, 1]            
+            column_sizes_completed = [0.7, 5.5, 1, 1, 1, 1]         
         elif section == "proofreading":
-            column_sizes_running = [0.7, 5, 1, 1.2, 1.2, 1.2, 1.1, 1]  
-            column_sizes_pending = [0.7, 5.5, 1, 1.2, 1.2, 1.2, 1, 1] 
-            column_sizes_completed = [0.7, 5.5, 1, 1, 1.2, 1.2, 1, 1.2]    # Book ID, Title, Date, Status, Writing By, Writing End, Proofreading End
-
+            column_sizes_running = [0.8, 5.5, 1, 1.2, 1, 0.8, 1.2, 1, 1, 1] 
+            column_sizes_pending = [0.8, 5.5, 1, 1.2, 1, 1, 1, 0.8, 0.8]     
         elif section == "formatting":
-            column_sizes_running = [0.7, 5.5, 1, 1, 1.2, 1.2, 1]  
-            column_sizes_pending = [0.7, 5.5, 1, 1, 1.2, 1, 1] 
-            column_sizes_completed = [0.7, 5.5, 1, 1, 1.2, 1.2, 1]
-
+            column_sizes_running = [0.7, 5.5, 1, 1, 1.2, 1.2, 1]      
+            column_sizes_pending = [0.7, 5.5, 1, 1, 1.2, 1, 1]         
+            column_sizes_completed = [0.7, 5.5, 1, 1, 1.2, 1, 1]       
         elif section == "cover":
-            column_sizes_running = [0.7, 5, 1, 1.2, 1.5, 1.5, 1,1,1]  
-            column_sizes_pending = [0.7, 6, 1, 1, 1, 1, 1]  
-            column_sizes_completed = [0.7, 5.5, 1, 1.3, 1, 1] 
-
-
+            column_sizes_running = [0.8, 5.4, 1.2, 1.2, 0.7, 0.7, 0.75, 1.2, 1, 1, 0.8, 0.7]  
+            column_sizes_pending = [0.8, 5.5, 1, 1.2, 1, 1, 1, 0.8, 1]            
+            column_sizes_completed = [0.7, 5.5, 1, 1, 1, 1]                   
         
         selected_month = render_month_selector(books_df)
         render_metrics(books_df, selected_month, section)
