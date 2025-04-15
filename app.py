@@ -86,10 +86,10 @@ def validate_token():
 
 #user_role = st.session_state.get("role", "Guest")
 
-#user_role = "writer"
+#user_role = "Writer"
 # user_role = "proofreader"
 
-user_role = st.pills("Select Role", ["writer", "proofreader", "formatter", "cover_designer"], default="writer", label_visibility='collapsed', key="user_role")
+user_role = st.pills("Select Role", ["Writer", "proofreader", "formatter", "cover_designer"], default="Writer", label_visibility='collapsed', key="user_role")
 user_role = user_role
 
 
@@ -904,7 +904,7 @@ def render_table(books_df, title, column_sizes, color, section, role, is_running
             elif role == "cover_designer":
                 if "Pending" in title or is_running:
                     columns.extend(["Apply ISBN", "Photo", "Details"])
-            elif role == "writer":
+            elif role == "Writer":
                 if "Completed" in title:
                     columns.append("Book Pages")
                 if "Pending" in title:
@@ -917,7 +917,7 @@ def render_table(books_df, title, column_sizes, color, section, role, is_running
                     columns.extend([f"{section.capitalize()} Start", f"{section.capitalize()} By"])
                     columns.append("Rating")  # Rating just before Action
                     columns.append("Action")
-                elif role == "writer":
+                elif role == "Writer":
                     columns.extend([f"{section.capitalize()} Start", f"{section.capitalize()} By"])
                     columns.append("Syllabus")  # Syllabus just before Action
                     columns.append("Action")
@@ -1072,7 +1072,7 @@ def render_table(books_df, title, column_sizes, color, section, role, is_running
                             class_name = "pill apply-isbn-yes" if value == "Yes" else "pill apply-isbn-no"
                             st.markdown(f'<span class="{class_name}">{value}</span>', unsafe_allow_html=True)
                         col_idx += 1
-                elif role == "writer":
+                elif role == "Writer":
                     if "Book Pages" in columns:
                         with col_configs[col_idx]:
                             book_pages = row['Number of Book Pages']
@@ -1190,7 +1190,7 @@ def render_table(books_df, title, column_sizes, color, section, role, is_running
 
 # --- Section Configuration ---
 sections = {
-    "writing": {"role": "writer", "color": "unused"},
+    "writing": {"role": "Writer", "color": "unused"},
     "proofreading": {"role": "proofreader", "color": "unused"},
     "formatting": {"role": "formatter", "color": "unused"},
     "cover": {"role": "cover_designer", "color": "unused"}
