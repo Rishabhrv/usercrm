@@ -1,19 +1,14 @@
 import streamlit as st
-import warnings
-import time
-import base64
-import json
-import hashlib
-import hmac
-from dotenv import load_dotenv
-import time
-import numpy as np  
+import warnings 
 import pandas as pd
 import os
+import jwt
 from sqlalchemy import text
 warnings.simplefilter('ignore')
-from datetime import datetime, timedelta
-
+import requests
+import datetime
+import time
+#from datetime import datetime, timedelta
 
 
 # Set page configuration
@@ -24,74 +19,126 @@ st.set_page_config(
      page_title="Content Dashboard",
 )
 
-# st.markdown("""
-#     <style>
+st.markdown("""
+    <style>
             
-#         /* Remove Streamlit's default top padding */
-#         .main > div {
-#             padding-top: 0px !important;
-#         }
-#         /* Ensure the first element has minimal spacing */
-#         .block-container {
-#             padding-top: 20px !important;  /* Small padding for breathing room */
-#         }
+        /* Remove Streamlit's default top padding */
+        .main > div {
+            padding-top: 0px !important;
+        }
+        /* Ensure the first element has minimal spacing */
+        .block-container {
+            padding-top: 47px !important;  /* Small padding for breathing room */
+        }
             
-#     </style>
-# """, unsafe_allow_html=True)
+    </style>
+""", unsafe_allow_html=True)
 
-load_dotenv()
-SECRET_KEY = os.getenv('SECRET_KEY', 'default-secret-key') 
+
+# Configuration
+FLASK_VALIDATE_URL = "https://crmserver.agvolumes.com/validate_token"
+JWT_SECRET = "O7qRK8GGKIwXsKn9cvhjXyeBsv9Ur9fD"
+FLASK_LOGIN_URL = "https://crmserver.agvolumes.com/login"
+VALID_ROLES = {"writer", "admin", "proofreader", "formatter", "cover_designer"}
+FLASK_LOGOUT_URL = "https://crmserver.agvolumes.com/logout"
 
 def validate_token():
+    # Check if token exists in session state or query params
     if 'token' not in st.session_state:
-        params = st.query_params
-        if 'token' in params:
-            st.session_state.token = params['token']
-        else:
-            st.error("Access Denied: Login Required")
+        token = st.query_params.get("token")
+        if not token:
+            st.error("Access denied: Please log in First")
+            st.markdown(f"[Go to Login]({FLASK_LOGIN_URL})")
             st.stop()
+        st.session_state.token = token if isinstance(token, str) else token[0]
 
     token = st.session_state.token
 
     try:
-        parts = token.split('.')
-        if len(parts) != 3:
-            raise ValueError("Invalid token format")
+        # Local validation
+        decoded = jwt.decode(token, JWT_SECRET, algorithms=['HS256'])
+        if not all(key in decoded for key in ['username', 'role', 'exp']):
+            raise jwt.InvalidTokenError("Missing required fields")
 
-        header = json.loads(base64.urlsafe_b64decode(parts[0] + '==').decode('utf-8'))
-        payload = json.loads(base64.urlsafe_b64decode(parts[1] + '==').decode('utf-8'))
+        # Server-side validation
+        response = requests.post(FLASK_VALIDATE_URL, json={"token": token}, timeout=5)
+        if response.status_code != 200 or not response.json().get('valid'):
+            error = response.json().get('error', 'Invalid token')
+            raise jwt.InvalidTokenError(error)
 
-        signature = base64.urlsafe_b64decode(parts[2] + '==')
-        expected_signature = hmac.new(
-            SECRET_KEY.encode(),
-            f"{parts[0]}.{parts[1]}".encode(),
-            hashlib.sha256
-        ).digest()
+        role = decoded['role'].lower()
+        if role not in VALID_ROLES:
+            raise jwt.InvalidTokenError(f"Invalid role '{role}'")
 
-        if not hmac.compare_digest(signature, expected_signature):
-            raise ValueError("Invalid token signature")
+        st.session_state.user = decoded['username']
+        st.session_state.role = role
+        st.session_state.exp = decoded['exp']
 
-        if 'exp' in payload and payload['exp'] < time.time():
-            raise ValueError("Token has expired")
-
-        # Store validated user info in session_state
-        st.session_state.user = payload['user']
-        st.session_state.role = payload['role']
-
-    except ValueError as e:
-        st.error(f"Access Denied: {e}")
+    except jwt.ExpiredSignatureError:
+        st.error("Access denied: Token expired. Please log in again.")
+        st.markdown(f"[Go to Login]({FLASK_LOGIN_URL})")
+        clear_auth_session()
+        st.stop()
+    except jwt.InvalidSignatureError:
+        st.error("Access denied: Invalid token signature. Please log in again.")
+        st.markdown(f"[Go to Login]({FLASK_LOGIN_URL})")
+        clear_auth_session()
+        st.stop()
+    except jwt.DecodeError:
+        st.error("Access denied: Token decoding failed. Please log in again.")
+        st.markdown(f"[Go to Login]({FLASK_LOGIN_URL})")
+        clear_auth_session()
+        st.stop()
+    except jwt.InvalidTokenError as e:
+        st.error(f"Access denied: {str(e)}. Please log in again.")
+        st.markdown(f"[Go to Login]({FLASK_LOGIN_URL})")
+        clear_auth_session()
+        st.stop()
+    except requests.RequestException:
+        st.error("Access denied: Unable to contact authentication server. Please try again later.")
+        st.markdown(f"[Go to Login]({FLASK_LOGIN_URL})")
+        clear_auth_session()
         st.stop()
 
-#validate_token()
+def clear_auth_session():
+    # Clear authentication-related session state keys
+    keys_to_clear = ['token', 'user', 'role', 'exp']
+    for key in keys_to_clear:
+        if key in st.session_state:
+            del st.session_state[key]
+    # Clear query parameters to prevent token reuse
+    st.query_params.clear()
 
-#user_role = st.session_state.get("role", "Guest")
+def logout():
+    try:
+        # Send token to Flask for blacklisting (optional)
+        token = st.session_state.get('token', '')
+        response = requests.post(FLASK_LOGOUT_URL, json={"token": token}, timeout=5)
+        if response.status_code == 200 and response.json().get('success'):
+            # Clear authentication-related session state and query params
+            clear_auth_session()
+            # Use JavaScript to clear browser history and redirect
+            st.write(
+                f"""
+                <script>
+                    window.history.replaceState(null, '', '{FLASK_LOGIN_URL}');
+                    window.location.href = '{FLASK_LOGIN_URL}';
+                </script>
+                """,
+                unsafe_allow_html=True
+            )
+            st.success("You have been logged out.")
+            st.markdown(f"[Go to Login]({FLASK_LOGIN_URL})")
+            st.stop()
+        else:
+            st.error("Logout failed. Please try again.")
+    except requests.RequestException:
+        st.error("Unable to contact logout server. Please try again later.")
 
-#user_role = "Writer"
-# user_role = "proofreader"
+# Run validation
+validate_token()
 
-user_role = st.pills("Select Role", ["Writer", "proofreader", "formatter", "cover_designer"], default="Writer", label_visibility='collapsed', key="user_role")
-user_role = user_role
-
+user_role = st.session_state.get("role", "Guest")
 
 st.cache_data.clear()
 
@@ -332,6 +379,7 @@ def render_month_selector(books_df):
     selected_month = st.pills("Select Month", unique_months, default=default_month, 
                              key=f"month_selector_{st.session_state.get('section', 'writing')}", 
                              label_visibility='collapsed')
+    st.caption(f"Welcome, {st.session_state.user}!")
     return selected_month
 
 from datetime import datetime, timedelta
@@ -370,7 +418,7 @@ def render_metrics(books_df, selected_month, section):
         ])
 
     # Render UI
-    col1, col2 = st.columns([11, 1], gap="large", vertical_alignment="bottom")
+    col1, col2  = st.columns([11, 1], gap="large", vertical_alignment="bottom")
     with col1:
         st.subheader(f"Metrics of {selected_month}")
     with col2:
@@ -904,7 +952,7 @@ def render_table(books_df, title, column_sizes, color, section, role, is_running
         elif role == "cover_designer":
             if "Pending" in title or is_running:
                 columns.extend(["Apply ISBN", "Photo", "Details"])
-        elif role == "Writer":
+        elif role == "writer":
             if "Completed" in title:
                 columns.append("Book Pages")
             if "Pending" in title:
@@ -915,7 +963,7 @@ def render_table(books_df, title, column_sizes, color, section, role, is_running
                 columns.extend(["Cover Status", "Cover By", "Action", "Details"])
             elif role == "proofreader":
                 columns.extend(["Proofreading Start", "Proofreading By", "Rating", "Action"])
-            elif role == "Writer":
+            elif role == "writer":
                 columns.extend(["Writing Start", "Writing By", "Syllabus", "Action"])
             else:
                 columns.extend([f"{section.capitalize()} Start", f"{section.capitalize()} By", "Action"])
@@ -1073,7 +1121,7 @@ def render_table(books_df, title, column_sizes, color, section, role, is_running
                         class_name = "pill apply-isbn-yes" if value == "Yes" else "pill apply-isbn-no"
                         st.markdown(f'<span class="{class_name}">{value}</span>', unsafe_allow_html=True)
                     col_idx += 1
-            elif role == "Writer":
+            elif role == "writer":
                 if "Book Pages" in columns:
                     with col_configs[col_idx]:
                         book_pages = row['Number of Book Pages']
@@ -1160,7 +1208,7 @@ def render_table(books_df, title, column_sizes, color, section, role, is_running
                     with col_configs[col_idx]:
                         if st.button("Edit", key=f"edit_{section}_{row['Book ID']}"):
                             edit_section_dialog(row['Book ID'], conn, section)
-                elif role == "Writer":
+                elif role == "writer":
                     with col_configs[col_idx]:
                         start = row['Writing Start']
                         if pd.notnull(start) and start != '0000-00-00 00:00:00':
@@ -1253,7 +1301,7 @@ def render_table(books_df, title, column_sizes, color, section, role, is_running
 
 # --- Section Configuration ---
 sections = {
-    "writing": {"role": "Writer", "color": "unused"},
+    "writing": {"role": "writer", "color": "unused"},
     "proofreading": {"role": "proofreader", "color": "unused"},
     "formatting": {"role": "formatter", "color": "unused"},
     "cover": {"role": "cover_designer", "color": "unused"}
