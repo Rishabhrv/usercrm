@@ -1324,8 +1324,9 @@ for section, config in sections.items():
             column_sizes_pending = [0.7, 5.5, 1, 1, 0.8, 1]            
             column_sizes_completed = [0.7, 5.5, 1, 1, 1, 1]         
         elif section == "proofreading":
-            column_sizes_running = [0.8, 5.5, 1, 1.2, 1, 0.8, 1.2, 1, 1, 1] 
-            column_sizes_pending = [0.8, 5.5, 1, 1.2, 1, 1, 1, 0.8, 0.8]     
+            column_sizes_running = [0.8, 5.5, 1, 1.2, 1, 1.2, 1.2, 1, 1] 
+            column_sizes_pending = [0.8, 5.5, 1, 1.2, 1, 1, 1, 0.8, 0.8] 
+            column_sizes_completed = [0.7, 5.5, 1, 1, 1.2, 1, 1,1]    
         elif section == "formatting":
             column_sizes_running = [0.7, 5.5, 1, 1, 1.2, 1.2, 1]      
             column_sizes_pending = [0.7, 5.5, 1, 1, 1.2, 1, 1]         
@@ -1333,7 +1334,7 @@ for section, config in sections.items():
         elif section == "cover":
             column_sizes_running = [0.8, 5, 1.2, 1.2, 0.7, 0.7, 0.75, 1.3, 1, 1, 1.2]  
             column_sizes_pending = [0.8, 5.5, 1, 1.2, 1, 1, 1, 0.8, 1]            
-            column_sizes_completed = [0.7, 5.5, 1, 1, 1, 1]                   
+            column_sizes_completed = [0.7, 5.5, 1, 1.5, 1.3, 1.3]                   
         
         selected_month = render_month_selector(books_df)
         render_metrics(books_df, selected_month, section)
