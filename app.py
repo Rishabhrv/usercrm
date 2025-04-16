@@ -33,7 +33,7 @@ st.markdown("""
         }
         /* Ensure the first element has minimal spacing */
         .block-container {
-            padding-top: 30px !important;  /* Small padding for breathing room */
+            padding-top: 20px !important;  /* Small padding for breathing room */
         }
             
     </style>
