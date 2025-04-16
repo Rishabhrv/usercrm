@@ -1092,7 +1092,8 @@ def render_table(books_df, title, column_sizes, color, section, role, is_running
                                     file_name=syllabus_path.split("/")[-1],
                                     mime="application/pdf",
                                     key=f"download_syllabus_{section}_{row['Book ID']}",
-                                    disabled=disabled
+                                    disabled=disabled,
+                                    help = "Download Syllabus"
                                 )
                         else:
                             st.download_button(
@@ -1101,7 +1102,8 @@ def render_table(books_df, title, column_sizes, color, section, role, is_running
                                 file_name="no_syllabus.pdf",
                                 mime="application/pdf",
                                 key=f"download_syllabus_{section}_{row['Book ID']}",
-                                disabled=disabled
+                                disabled=disabled,
+                                help = "No Syllabus Available"
                             )
                     col_idx += 1
             
@@ -1320,7 +1322,7 @@ for section, config in sections.items():
 
         # Column sizes (adjusted to match previous updates)
         if section == "writing":
-            column_sizes_running = [0.7, 5.5, 1, 1, 0.8, 1.2, 1, 1, 1,1,1,1]  
+            column_sizes_running = [0.7, 5.5, 1, 1, 1.2, 1.2, 1, 1]  
             column_sizes_pending = [0.7, 5.5, 1, 1, 0.8, 1]            
             column_sizes_completed = [0.7, 5.5, 1, 1, 1, 1]         
         elif section == "proofreading":
