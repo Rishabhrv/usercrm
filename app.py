@@ -24,20 +24,20 @@ st.set_page_config(
      page_title="Content Dashboard",
 )
 
-st.markdown("""
-    <style>
+# st.markdown("""
+#     <style>
             
-        /* Remove Streamlit's default top padding */
-        .main > div {
-            padding-top: 0px !important;
-        }
-        /* Ensure the first element has minimal spacing */
-        .block-container {
-            padding-top: 20px !important;  /* Small padding for breathing room */
-        }
+#         /* Remove Streamlit's default top padding */
+#         .main > div {
+#             padding-top: 0px !important;
+#         }
+#         /* Ensure the first element has minimal spacing */
+#         .block-container {
+#             padding-top: 20px !important;  /* Small padding for breathing room */
+#         }
             
-    </style>
-""", unsafe_allow_html=True)
+#     </style>
+# """, unsafe_allow_html=True)
 
 load_dotenv()
 SECRET_KEY = os.getenv('SECRET_KEY', 'default-secret-key') 
@@ -868,325 +868,386 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
+import os
+
+import os
+
 def render_table(books_df, title, column_sizes, color, section, role, is_running=False):
     if books_df.empty:
         st.warning(f"No {title.lower()} books available from the last 3 months.")
-    else:
-        cont = st.container(border=True)
-        with cont:
-            count = len(books_df)
-            if "Running" in title:
-                badge_color = 'yellow'
-            elif "Pending" in title:
-                badge_color = 'red'
-            else:  # Completed
-                badge_color = 'green'
-            st.markdown(f"<h5><span class='status-badge-{badge_color}'>{title} Books <span class='badge-count'>{count}</span></span></h5>", 
-                        unsafe_allow_html=True)
-            st.markdown('<div class="header-row">', unsafe_allow_html=True)
-            
-            # Base columns
-            columns = ["Book ID", "Title", "Date", "Status"]
-            # Role-specific additional columns
-            if role == "proofreader":
-                columns.append("Writing By")
-                if not is_running:
-                    columns.append("Writing End")
-                if "Pending" in title or "Completed" in title:
-                    columns.append("Book Pages")
-                if "Pending" in title:
-                    columns.append("Rating")
-            elif role == "formatter":
-                if not is_running:
-                    columns.append("Proofreading End")
-                if "Pending" in title or "Completed" in title:
-                    columns.append("Book Pages")
-            elif role == "cover_designer":
-                if "Pending" in title or is_running:
-                    columns.extend(["Apply ISBN", "Photo", "Details"])
+        return
+    
+    cont = st.container(border=True)
+    with cont:
+        count = len(books_df)
+        badge_color = 'yellow' if "Running" in title else 'red' if "Pending" in title else 'green'
+        st.markdown(f"<h5><span class='status-badge-{badge_color}'>{title} Books <span class='badge-count'>{count}</span></span></h5>", 
+                    unsafe_allow_html=True)
+        st.markdown('<div class="header-row">', unsafe_allow_html=True)
+        
+        # Base columns
+        columns = ["Book ID", "Title", "Date", "Status"]
+        # Role-specific additional columns
+        if role == "proofreader":
+            columns.append("Writing By")
+            if not is_running:
+                columns.append("Writing End")
+            if "Pending" in title or "Completed" in title:
+                columns.append("Book Pages")
+            if "Pending" in title:
+                columns.append("Rating")
+        elif role == "formatter":
+            if not is_running:
+                columns.append("Proofreading End")
+            if "Pending" in title or "Completed" in title:
+                columns.append("Book Pages")
+        elif role == "cover_designer":
+            if "Pending" in title or is_running:
+                columns.extend(["Apply ISBN", "Photo", "Details"])
+        elif role == "Writer":
+            if "Completed" in title:
+                columns.append("Book Pages")
+            if "Pending" in title:
+                columns.append("Syllabus")
+        # Adjust columns based on table type
+        if is_running:
+            if role == "cover_designer":
+                columns.extend(["Cover Status", "Cover By", "Action", "Details"])
+            elif role == "proofreader":
+                columns.extend(["Proofreading Start", "Proofreading By", "Rating", "Action"])
             elif role == "Writer":
-                if "Completed" in title:
-                    columns.append("Book Pages")
-                if "Pending" in title:
-                    columns.append("Syllabus")
-            # Adjust columns based on table type
-            if is_running:
-                if role == "cover_designer":
-                    columns.extend(["Cover Status", "Cover By", "Action", "Details"])
-                elif role == "proofreader":
-                    columns.extend([f"{section.capitalize()} Start", f"{section.capitalize()} By"])
-                    columns.append("Rating")  # Rating just before Action
-                    columns.append("Action")
-                elif role == "Writer":
-                    columns.extend([f"{section.capitalize()} Start", f"{section.capitalize()} By"])
-                    columns.append("Syllabus")  # Syllabus just before Action
-                    columns.append("Action")
-                else:
-                    columns.extend([f"{section.capitalize()} Start", f"{section.capitalize()} By", "Action"])
-            elif "Pending" in title:
-                if role == "cover_designer":
-                    columns.extend(["Action", "Details"])
-                else:
-                    columns.append("Action")
-            elif "Completed" in title:
-                if role == "cover_designer":
-                    columns.extend(["Front Cover End", "Back Cover End"])
-                else:
-                    columns.append(f"{section.capitalize()} End")
-            
-            col_configs = st.columns(column_sizes[:len(columns)])
-            for i, col in enumerate(columns):
-                with col_configs[i]:
-                    st.markdown(f'<span class="header">{col}</span>', unsafe_allow_html=True)
-            st.markdown('</div><div class="header-line"></div>', unsafe_allow_html=True)
-
-            current_date = datetime.now().date()
-            # Worker maps for Proofreading By and Writing By (all tables)
-            if user_role == role:
-                unique_workers = [w for w in books_df[f'{section.capitalize()} By'].unique() if pd.notnull(w)]
-                worker_map = {worker: idx % 10 for idx, worker in enumerate(unique_workers)}
-                if role == "proofreader":
-                    unique_writing_workers = [w for w in books_df['Writing By'].unique() if pd.notnull(w)]
-                    writing_worker_map = {worker: idx % 10 for idx, worker in enumerate(unique_writing_workers)}
-                else:
-                    writing_worker_map = None
+                columns.extend(["Writing Start", "Writing By", "Syllabus", "Action"])
             else:
-                worker_map = None
-                writing_worker_map = None
+                columns.extend([f"{section.capitalize()} Start", f"{section.capitalize()} By", "Action"])
+        elif "Pending" in title:
+            if role == "cover_designer":
+                columns.extend(["Action", "Details"])
+            else:
+                columns.append("Action")
+        elif "Completed" in title:
+            if role == "cover_designer":
+                columns.extend(["Front Cover End", "Back Cover End"])
+            else:
+                columns.append(f"{section.capitalize()} End")
+        
+        # Validate column sizes
+        if len(column_sizes) < len(columns):
+            st.error(f"Column size mismatch in {title}: {len(columns)} columns but only {len(column_sizes)} sizes provided.")
+            return
+        
+        col_configs = st.columns(column_sizes[:len(columns)])
+        for i, col in enumerate(columns):
+            with col_configs[i]:
+                st.markdown(f'<span class="header">{col}</span>', unsafe_allow_html=True)
+        st.markdown('</div><div class="header-line"></div>', unsafe_allow_html=True)
 
-            for _, row in books_df.iterrows():
-                col_configs = st.columns(column_sizes[:len(columns)])
-                col_idx = 0
-                
-                with col_configs[col_idx]:
-                    st.write(row['Book ID'])
-                col_idx += 1
-                with col_configs[col_idx]:
-                    st.write(row['Title'])
-                col_idx += 1
-                with col_configs[col_idx]:
-                    st.write(row['Date'].strftime('%Y-%m-%d') if pd.notnull(row['Date']) else "-")
-                col_idx += 1
-                with col_configs[col_idx]:
-                    if role == "cover_designer":
-                        if pd.notnull(row['Front Cover End']) and pd.notnull(row['Back Cover End']):
-                            status = "Completed"
-                            days_ago = (current_date - row['Front Cover End'].date()).days if pd.notnull(row['Front Cover End']) else None
-                            status_html = f'<span class="pill status-completed">{status}'
-                            if days_ago is not None:
-                                status_html += f' ({days_ago}d ago)'
-                            status_html += '</span>'
-                        elif pd.notnull(row['Front Cover Start']) or pd.notnull(row['Back Cover Start']):
-                            status = "Running"
-                            start_date = row['Front Cover Start'] if pd.notnull(row['Front Cover Start']) else row['Back Cover Start']
-                            days = (current_date - start_date.date()).days if pd.notnull(start_date) else None
-                            status_html = f'<span class="pill status-running">{status}'
-                            if days is not None:
-                                status_html += f' {days}d'
-                            status_html += '</span>'
-                        else:
-                            status = "Pending"
-                            days_since = get_days_since_enrolled(row['Date'], current_date)
-                            status_html = f'<span class="pill status-pending">{status}'
-                            if days_since is not None:
-                                status_html += f'<span class="since-enrolled">{days_since}d</span>'
-                            status_html += '</span>'
-                    else:
-                        status, days = get_status(row[f'{section.capitalize()} Start'], row[f'{section.capitalize()} End'], current_date)
-                        days_since = get_days_since_enrolled(row['Date'], current_date)
-                        status_html = f'<span class="pill status-{"pending" if status == "Pending" else "running" if status == "Running" else "completed"}">{status}'
-                        if days is not None and status == "Running":
+        current_date = datetime.now().date()
+        # Worker maps
+        if user_role == role:
+            unique_workers = [w for w in books_df[f'{section.capitalize()} By'].unique() if pd.notnull(w)]
+            worker_map = {worker: idx % 10 for idx, worker in enumerate(unique_workers)}
+            if role == "proofreader":
+                unique_writing_workers = [w for w in books_df['Writing By'].unique() if pd.notnull(w)]
+                writing_worker_map = {worker: idx % 10 for idx, worker in enumerate(unique_writing_workers)}
+            else:
+                writing_worker_map = None
+        else:
+            worker_map = None
+            writing_worker_map = None
+
+        for _, row in books_df.iterrows():
+            col_configs = st.columns(column_sizes[:len(columns)])
+            col_idx = 0
+            
+            with col_configs[col_idx]:
+                st.write(row['Book ID'])
+            col_idx += 1
+            with col_configs[col_idx]:
+                st.write(row['Title'])
+            col_idx += 1
+            with col_configs[col_idx]:
+                st.write(row['Date'].strftime('%Y-%m-%d') if pd.notnull(row['Date']) else "-")
+            col_idx += 1
+            with col_configs[col_idx]:
+                if role == "cover_designer":
+                    if pd.notnull(row['Front Cover End']) and pd.notnull(row['Back Cover End']):
+                        status = "Completed"
+                        days_ago = (current_date - row['Front Cover End'].date()).days if pd.notnull(row['Front Cover End']) else None
+                        status_html = f'<span class="pill status-completed">{status}'
+                        if days_ago is not None:
+                            status_html += f' ({days_ago}d ago)'
+                        status_html += '</span>'
+                    elif pd.notnull(row['Front Cover Start']) or pd.notnull(row['Back Cover Start']):
+                        status = "Running"
+                        start_date = row['Front Cover Start'] if pd.notnull(row['Front Cover Start']) else row['Back Cover Start']
+                        days = (current_date - start_date.date()).days if pd.notnull(start_date) else None
+                        status_html = f'<span class="pill status-running">{status}'
+                        if days is not None:
                             status_html += f' {days}d'
-                        elif "Completed" in title:
-                            end_date = row[f'{section.capitalize()} End']
-                            days_ago = (current_date - end_date.date()).days if pd.notnull(end_date) else None
-                            if days_ago is not None:
-                                status_html += f' ({days_ago}d ago)'
-                        elif not is_running and days_since is not None:
+                        status_html += '</span>'
+                    else:
+                        status = "Pending"
+                        days_since = get_days_since_enrolled(row['Date'], current_date)
+                        status_html = f'<span class="pill status-pending">{status}'
+                        if days_since is not None:
                             status_html += f'<span class="since-enrolled">{days_since}d</span>'
                         status_html += '</span>'
-                    st.markdown(status_html, unsafe_allow_html=True)
+                else:
+                    status, days = get_status(row[f'{section.capitalize()} Start'], row[f'{section.capitalize()} End'], current_date)
+                    days_since = get_days_since_enrolled(row['Date'], current_date)
+                    status_html = f'<span class="pill status-{"pending" if status == "Pending" else "running" if status == "Running" else "completed"}">{status}'
+                    if days is not None and status == "Running":
+                        status_html += f' {days}d'
+                    elif "Completed" in title:
+                        end_date = row[f'{section.capitalize()} End']
+                        days_ago = (current_date - end_date.date()).days if pd.notnull(end_date) else None
+                        if days_ago is not None:
+                            status_html += f' ({days_ago}d ago)'
+                    elif not is_running and days_since is not None:
+                        status_html += f'<span class="since-enrolled">{days_since}d</span>'
+                    status_html += '</span>'
+                st.markdown(status_html, unsafe_allow_html=True)
+            col_idx += 1
+            
+            # Role-specific columns
+            if role == "proofreader":
+                with col_configs[col_idx]:
+                    writing_by = row['Writing By']
+                    value = writing_by if pd.notnull(writing_by) and writing_by else "-"
+                    if writing_worker_map and value != "-":
+                        writing_idx = writing_worker_map.get(writing_by)
+                        class_name = f"worker-by-{writing_idx}" if writing_idx is not None else "worker-by-not"
+                        st.markdown(f'<span class="pill {class_name}">{value}</span>', unsafe_allow_html=True)
+                    else:
+                        st.markdown(f'<span>{value}</span>', unsafe_allow_html=True)
                 col_idx += 1
-                
-                # Role-specific columns
-                if role == "proofreader":
+                if "Writing End" in columns:
                     with col_configs[col_idx]:
-                        writing_by = row['Writing By']
-                        value = writing_by if pd.notnull(writing_by) and writing_by else "-"
-                        if writing_worker_map and value != "-":
-                            writing_idx = writing_worker_map.get(writing_by)
-                            class_name = f"worker-by-{writing_idx}" if writing_idx is not None else "worker-by-not"
-                            st.markdown(f'<span class="pill {class_name}">{value}</span>', unsafe_allow_html=True)
-                        else:
-                            st.markdown(f'<span>{value}</span>', unsafe_allow_html=True)
+                        writing_end = row['Writing End']
+                        value = writing_end.strftime('%Y-%m-%d') if not pd.isna(writing_end) and writing_end != '0000-00-00 00:00:00' else "-"
+                        st.markdown(f'<span>{value}</span>', unsafe_allow_html=True)
                     col_idx += 1
-                    if "Writing End" in columns:
-                        with col_configs[col_idx]:
-                            writing_end = row['Writing End']
-                            value = writing_end.strftime('%Y-%m-%d') if not pd.isna(writing_end) and writing_end != '0000-00-00 00:00:00' else "-"
-                            st.markdown(f'<span>{value}</span>', unsafe_allow_html=True)
-                        col_idx += 1
-                    if "Book Pages" in columns:
-                        with col_configs[col_idx]:
-                            book_pages = row['Number of Book Pages']
-                            value = str(book_pages) if pd.notnull(book_pages) and book_pages != 0 else "-"
-                            st.markdown(f'<span>{value}</span>', unsafe_allow_html=True)
-                        col_idx += 1
-                    if "Rating" in columns:
-                        with col_configs[col_idx]:
-                            if st.button("Rate", key=f"rate_{section}_{row['Book ID']}"):
-                                rate_user_dialog(row['Book ID'], conn)
-                        col_idx += 1
-                elif role == "formatter":
-                    if "Proofreading End" in columns:
-                        with col_configs[col_idx]:
-                            proofreading_end = row['Proofreading End']
-                            value = proofreading_end.strftime('%Y-%m-%d') if not pd.isna(proofreading_end) and proofreading_end != '0000-00-00 00:00:00' else "-"
-                            st.markdown(f'<span>{value}</span>', unsafe_allow_html=True)
-                        col_idx += 1
-                    if "Book Pages" in columns:
-                        with col_configs[col_idx]:
-                            book_pages = row['Number of Book Pages']
-                            value = str(book_pages) if pd.notnull(book_pages) and book_pages != 0 else "-"
-                            st.markdown(f'<span>{value}</span>', unsafe_allow_html=True)
-                        col_idx += 1
-                elif role == "cover_designer":
-                    if "Apply ISBN" in columns:
-                        with col_configs[col_idx]:
-                            apply_isbn = row['Apply ISBN']
-                            value = "Yes" if pd.notnull(apply_isbn) and apply_isbn else "No"
-                            class_name = "pill apply-isbn-yes" if value == "Yes" else "pill apply-isbn-no"
-                            st.markdown(f'<span class="{class_name}">{value}</span>', unsafe_allow_html=True)
-                        col_idx += 1
-                    if "Photo" in columns:
-                        with col_configs[col_idx]:
-                            photo_received = row['All Photos Received']
-                            value = "Yes" if pd.notnull(photo_received) and photo_received else "No"
-                            class_name = "pill apply-isbn-yes" if value == "Yes" else "pill apply-isbn-no"
-                            st.markdown(f'<span class="{class_name}">{value}</span>', unsafe_allow_html=True)
-                        col_idx += 1
-                    if "Details" in columns:
-                        with col_configs[col_idx]:
-                            details_sent = row['All Details Sent']
-                            value = "Yes" if pd.notnull(details_sent) and details_sent else "No"
-                            class_name = "pill apply-isbn-yes" if value == "Yes" else "pill apply-isbn-no"
-                            st.markdown(f'<span class="{class_name}">{value}</span>', unsafe_allow_html=True)
-                        col_idx += 1
-                elif role == "Writer":
-                    if "Book Pages" in columns:
-                        with col_configs[col_idx]:
-                            book_pages = row['Number of Book Pages']
-                            value = str(book_pages) if pd.notnull(book_pages) and book_pages != 0 else "-"
-                            st.markdown(f'<span>{value}</span>', unsafe_allow_html=True)
-                        col_idx += 1
-                    if "Syllabus" in columns:
-                        with col_configs[col_idx]:
-                            syllabus_path = row['Syllabus Path']
-                            disabled = pd.isna(syllabus_path) or not syllabus_path
-                            if not disabled:
-                                with open(syllabus_path, "rb") as file:
-                                    st.download_button(
-                                        label=":material/download:",
-                                        data=file,
-                                        file_name=syllabus_path.split("/")[-1],
-                                        mime="application/pdf",
-                                        key=f"download_syllabus_{section}_{row['Book ID']}",
-                                        disabled=disabled
-                                    )
-                            else:
+                if "Book Pages" in columns:
+                    with col_configs[col_idx]:
+                        book_pages = row['Number of Book Pages']
+                        value = str(book_pages) if pd.notnull(book_pages) and book_pages != 0 else "-"
+                        st.markdown(f'<span>{value}</span>', unsafe_allow_html=True)
+                    col_idx += 1
+                if "Rating" in columns and not is_running:  # Rating for Pending only
+                    with col_configs[col_idx]:
+                        if st.button("Rate", key=f"rate_{section}_{row['Book ID']}"):
+                            rate_user_dialog(row['Book ID'], conn)
+                    col_idx += 1
+            elif role == "formatter":
+                if "Proofreading End" in columns:
+                    with col_configs[col_idx]:
+                        proofreading_end = row['Proofreading End']
+                        value = proofreading_end.strftime('%Y-%m-%d') if not pd.isna(proofreading_end) and proofreading_end != '0000-00-00 00:00:00' else "-"
+                        st.markdown(f'<span>{value}</span>', unsafe_allow_html=True)
+                    col_idx += 1
+                if "Book Pages" in columns:
+                    with col_configs[col_idx]:
+                        book_pages = row['Number of Book Pages']
+                        value = str(book_pages) if pd.notnull(book_pages) and book_pages != 0 else "-"
+                        st.markdown(f'<span>{value}</span>', unsafe_allow_html=True)
+                    col_idx += 1
+            elif role == "cover_designer":
+                if "Apply ISBN" in columns:
+                    with col_configs[col_idx]:
+                        apply_isbn = row['Apply ISBN']
+                        value = "Yes" if pd.notnull(apply_isbn) and apply_isbn else "No"
+                        class_name = "pill apply-isbn-yes" if value == "Yes" else "pill apply-isbn-no"
+                        st.markdown(f'<span class="{class_name}">{value}</span>', unsafe_allow_html=True)
+                    col_idx += 1
+                if "Photo" in columns:
+                    with col_configs[col_idx]:
+                        photo_received = row['All Photos Received']
+                        value = "Yes" if pd.notnull(photo_received) and photo_received else "No"
+                        class_name = "pill apply-isbn-yes" if value == "Yes" else "pill apply-isbn-no"
+                        st.markdown(f'<span class="{class_name}">{value}</span>', unsafe_allow_html=True)
+                    col_idx += 1
+                if "Details" in columns:
+                    with col_configs[col_idx]:
+                        details_sent = row['All Details Sent']
+                        value = "Yes" if pd.notnull(details_sent) and details_sent else "No"
+                        class_name = "pill apply-isbn-yes" if value == "Yes" else "pill apply-isbn-no"
+                        st.markdown(f'<span class="{class_name}">{value}</span>', unsafe_allow_html=True)
+                    col_idx += 1
+            elif role == "Writer":
+                if "Book Pages" in columns:
+                    with col_configs[col_idx]:
+                        book_pages = row['Number of Book Pages']
+                        value = str(book_pages) if pd.notnull(book_pages) and book_pages != 0 else "-"
+                        st.markdown(f'<span>{value}</span>', unsafe_allow_html=True)
+                    col_idx += 1
+                if "Syllabus" in columns and not is_running:  # Syllabus for Pending only
+                    with col_configs[col_idx]:
+                        syllabus_path = row['Syllabus Path']
+                        disabled = pd.isna(syllabus_path) or not syllabus_path or not os.path.exists(syllabus_path)
+                        if not disabled:
+                            with open(syllabus_path, "rb") as file:
                                 st.download_button(
                                     label=":material/download:",
-                                    data="",
-                                    file_name="no_syllabus.pdf",
+                                    data=file,
+                                    file_name=syllabus_path.split("/")[-1],
                                     mime="application/pdf",
                                     key=f"download_syllabus_{section}_{row['Book ID']}",
                                     disabled=disabled
                                 )
-                        col_idx += 1
-                
-                # Running-specific columns
-                if is_running and user_role == role:
-                    if role == "cover_designer":
-                        with col_configs[col_idx]:
-                            front_start = row['Front Cover Start']
-                            back_start = row['Back Cover Start']
-                            if pd.notnull(front_start) and pd.notnull(back_start):
-                                status = "Both Running"
-                                class_name = "status-running"
-                            elif pd.notnull(front_start):
-                                status = "Back Pending"
-                                class_name = "status-pending"
-                            elif pd.notnull(back_start):
-                                status = "Front Pending"
-                                class_name = "status-pending"
-                            else:
-                                status = "Both Pending"
-                                class_name = "status-pending"
-                            st.markdown(f'<span class="pill {class_name}">{status}</span>', unsafe_allow_html=True)
-                        col_idx += 1
-                        with col_configs[col_idx]:
-                            worker = row['Cover By']
-                            value = worker if pd.notnull(worker) else "Not Assigned"
-                            st.markdown(f'<span class="pill worker-by-not">{value}</span>', unsafe_allow_html=True)
-                        col_idx += 1
-                        with col_configs[col_idx]:
-                            if st.button("Edit", key=f"edit_{section}_{row['Book ID']}"):
-                                edit_section_dialog(row['Book ID'], conn, section)
-                        col_idx += 1
-                        with col_configs[col_idx]:
-                            if st.button("Details", key=f"details_{section}_{row['Book ID']}"):
-                                show_author_details_dialog(row['Book ID'])
-                    else:
-                        with col_configs[col_idx]:
-                            start = row[f'{section.capitalize()} Start']
-                            if pd.notnull(start) and start != '0000-00-00 00:00:00':
-                                st.markdown(f'<span class="pill section-start-date">{start.strftime("%d %B %Y")}</span>', unsafe_allow_html=True)
-                            else:
-                                st.markdown('<span class="pill section-start-not">Not started</span>', unsafe_allow_html=True)
-                        col_idx += 1
-                        with col_configs[col_idx]:
-                            worker, worker_idx = get_worker_by(row[f'{section.capitalize()} Start'], 
-                                                              row[f'{section.capitalize()} By'], worker_map)
-                            class_name = f"worker-by-{worker_idx}" if worker_idx is not None else "worker-by-not"
-                            st.markdown(f'<span class="pill {class_name}">{worker}</span>', unsafe_allow_html=True)
-                        col_idx += 1
-                        with col_configs[col_idx]:
-                            if st.button("Edit", key=f"edit_{section}_{row['Book ID']}"):
-                                edit_section_dialog(row['Book ID'], conn, section)
-                        col_idx += 1
-                # Pending-specific column
-                elif "Pending" in title and user_role == role:
-                    if role == "cover_designer":
-                        with col_configs[col_idx]:
-                            if st.button("Edit", key=f"edit_{section}_{row['Book ID']}"):
-                                edit_section_dialog(row['Book ID'], conn, section)
-                        col_idx += 1
-                        with col_configs[col_idx]:
-                            if st.button("Details", key=f"details_{section}_{row['Book ID']}"):
-                                show_author_details_dialog(row['Book ID'])
-                    else:
-                        with col_configs[col_idx]:
-                            if st.button("Edit", key=f"edit_{section}_{row['Book ID']}"):
-                                edit_section_dialog(row['Book ID'], conn, section)
-                # Completed-specific column
-                elif "Completed" in title:
-                    if role == "cover_designer":
-                        with col_configs[col_idx]:
-                            front_end = row['Front Cover End']
-                            value = front_end.strftime('%Y-%m-%d') if not pd.isna(front_end) and front_end != '0000-00-00 00:00:00' else "-"
-                            st.markdown(f'<span>{value}</span>', unsafe_allow_html=True)
-                        col_idx += 1
-                        with col_configs[col_idx]:
-                            back_end = row['Back Cover End']
-                            value = back_end.strftime('%Y-%m-%d') if not pd.isna(back_end) and back_end != '0000-00-00 00:00:00' else "-"
-                            st.markdown(f'<span>{value}</span>', unsafe_allow_html=True)
-                        col_idx += 1
-                    else:
-                        with col_configs[col_idx]:
-                            end_date = row[f'{section.capitalize()} End']
-                            value = end_date.strftime('%Y-%m-%d') if not pd.isna(end_date) and end_date != '0000-00-00 00:00:00' else "-"
-                            st.markdown(f'<span>{value}</span>', unsafe_allow_html=True)
-                        col_idx += 1
+                        else:
+                            st.download_button(
+                                label=":material/download:",
+                                data="",
+                                file_name="no_syllabus.pdf",
+                                mime="application/pdf",
+                                key=f"download_syllabus_{section}_{row['Book ID']}",
+                                disabled=disabled
+                            )
+                    col_idx += 1
+            
+            # Running-specific columns
+            if is_running and user_role == role:
+                if role == "cover_designer":
+                    with col_configs[col_idx]:
+                        front_start = row['Front Cover Start']
+                        back_start = row['Back Cover Start']
+                        if pd.notnull(front_start) and pd.notnull(back_start):
+                            status = "Both Running"
+                            class_name = "status-running"
+                        elif pd.notnull(front_start):
+                            status = "Back Pending"
+                            class_name = "status-pending"
+                        elif pd.notnull(back_start):
+                            status = "Front Pending"
+                            class_name = "status-pending"
+                        else:
+                            status = "Both Pending"
+                            class_name = "status-pending"
+                        st.markdown(f'<span class="pill {class_name}">{status}</span>', unsafe_allow_html=True)
+                    col_idx += 1
+                    with col_configs[col_idx]:
+                        worker = row['Cover By']
+                        value = worker if pd.notnull(worker) else "Not Assigned"
+                        st.markdown(f'<span class="pill worker-by-not">{value}</span>', unsafe_allow_html=True)
+                    col_idx += 1
+                    with col_configs[col_idx]:
+                        if st.button("Edit", key=f"edit_{section}_{row['Book ID']}"):
+                            edit_section_dialog(row['Book ID'], conn, section)
+                    col_idx += 1
+                    with col_configs[col_idx]:
+                        if st.button("Details", key=f"details_{section}_{row['Book ID']}"):
+                            show_author_details_dialog(row['Book ID'])
+                elif role == "proofreader":
+                    with col_configs[col_idx]:
+                        start = row['Proofreading Start']
+                        if pd.notnull(start) and start != '0000-00-00 00:00:00':
+                            st.markdown(f'<span class="pill section-start-date">{start.strftime("%d %B %Y")}</span>', unsafe_allow_html=True)
+                        else:
+                            st.markdown('<span class="pill section-start-not">Not started</span>', unsafe_allow_html=True)
+                    col_idx += 1
+                    with col_configs[col_idx]:
+                        worker, worker_idx = get_worker_by(row['Proofreading Start'], 
+                                                          row['Proofreading By'], worker_map)
+                        class_name = f"worker-by-{worker_idx}" if worker_idx is not None else "worker-by-not"
+                        st.markdown(f'<span class="pill {class_name}">{worker}</span>', unsafe_allow_html=True)
+                    col_idx += 1
+                    with col_configs[col_idx]:
+                        if st.button("Rate", key=f"rate_{section}_{row['Book ID']}"):
+                            rate_user_dialog(row['Book ID'], conn)
+                    col_idx += 1
+                    with col_configs[col_idx]:
+                        if st.button("Edit", key=f"edit_{section}_{row['Book ID']}"):
+                            edit_section_dialog(row['Book ID'], conn, section)
+                elif role == "Writer":
+                    with col_configs[col_idx]:
+                        start = row['Writing Start']
+                        if pd.notnull(start) and start != '0000-00-00 00:00:00':
+                            st.markdown(f'<span class="pill section-start-date">{start.strftime("%d %B %Y")}</span>', unsafe_allow_html=True)
+                        else:
+                            st.markdown('<span class="pill section-start-not">Not started</span>', unsafe_allow_html=True)
+                    col_idx += 1
+                    with col_configs[col_idx]:
+                        worker, worker_idx = get_worker_by(row['Writing Start'], 
+                                                          row['Writing By'], worker_map)
+                        class_name = f"worker-by-{worker_idx}" if worker_idx is not None else "worker-by-not"
+                        st.markdown(f'<span class="pill {class_name}">{worker}</span>', unsafe_allow_html=True)
+                    col_idx += 1
+                    with col_configs[col_idx]:
+                        syllabus_path = row['Syllabus Path']
+                        disabled = pd.isna(syllabus_path) or not syllabus_path or not os.path.exists(syllabus_path)
+                        if not disabled:
+                            with open(syllabus_path, "rb") as file:
+                                st.download_button(
+                                    label=":material/download:",
+                                    data=file,
+                                    file_name=syllabus_path.split("/")[-1],
+                                    mime="application/pdf",
+                                    key=f"download_syllabus_{section}_{row['Book ID']}_running",
+                                    disabled=disabled
+                                )
+                        else:
+                            st.download_button(
+                                label=":material/download:",
+                                data="",
+                                file_name="no_syllabus.pdf",
+                                mime="application/pdf",
+                                key=f"download_syllabus_{section}_{row['Book ID']}_running",
+                                disabled=disabled
+                            )
+                    col_idx += 1
+                    with col_configs[col_idx]:
+                        if st.button("Edit", key=f"edit_{section}_{row['Book ID']}"):
+                            edit_section_dialog(row['Book ID'], conn, section)
+                else:
+                    with col_configs[col_idx]:
+                        start = row[f'{section.capitalize()} Start']
+                        if pd.notnull(start) and start != '0000-00-00 00:00:00':
+                            st.markdown(f'<span class="pill section-start-date">{start.strftime("%d %B %Y")}</span>', unsafe_allow_html=True)
+                        else:
+                            st.markdown('<span class="pill section-start-not">Not started</span>', unsafe_allow_html=True)
+                    col_idx += 1
+                    with col_configs[col_idx]:
+                        worker, worker_idx = get_worker_by(row[f'{section.capitalize()} Start'], 
+                                                          row[f'{section.capitalize()} By'], worker_map)
+                        class_name = f"worker-by-{worker_idx}" if worker_idx is not None else "worker-by-not"
+                        st.markdown(f'<span class="pill {class_name}">{worker}</span>', unsafe_allow_html=True)
+                    col_idx += 1
+                    with col_configs[col_idx]:
+                        if st.button("Edit", key=f"edit_{section}_{row['Book ID']}"):
+                            edit_section_dialog(row['Book ID'], conn, section)
+            # Pending-specific column
+            elif "Pending" in title and user_role == role:
+                if role == "cover_designer":
+                    with col_configs[col_idx]:
+                        if st.button("Edit", key=f"edit_{section}_{row['Book ID']}"):
+                            edit_section_dialog(row['Book ID'], conn, section)
+                    col_idx += 1
+                    with col_configs[col_idx]:
+                        if st.button("Details", key=f"details_{section}_{row['Book ID']}"):
+                            show_author_details_dialog(row['Book ID'])
+                else:
+                    with col_configs[col_idx]:
+                        if st.button("Edit", key=f"edit_{section}_{row['Book ID']}"):
+                            edit_section_dialog(row['Book ID'], conn, section)
+            # Completed-specific column
+            elif "Completed" in title:
+                if role == "cover_designer":
+                    with col_configs[col_idx]:
+                        front_end = row['Front Cover End']
+                        value = front_end.strftime('%Y-%m-%d') if not pd.isna(front_end) and front_end != '0000-00-00 00:00:00' else "-"
+                        st.markdown(f'<span>{value}</span>', unsafe_allow_html=True)
+                    col_idx += 1
+                    with col_configs[col_idx]:
+                        back_end = row['Back Cover End']
+                        value = back_end.strftime('%Y-%m-%d') if not pd.isna(back_end) and back_end != '0000-00-00 00:00:00' else "-"
+                        st.markdown(f'<span>{value}</span>', unsafe_allow_html=True)
+                    col_idx += 1
+                else:
+                    with col_configs[col_idx]:
+                        end_date = row[f'{section.capitalize()} End']
+                        value = end_date.strftime('%Y-%m-%d') if not pd.isna(end_date) and end_date != '0000-00-00 00:00:00' else "-"
+                        st.markdown(f'<span>{value}</span>', unsafe_allow_html=True)
+                    col_idx += 1
 
 # --- Section Configuration ---
 sections = {
@@ -1259,7 +1320,7 @@ for section, config in sections.items():
 
         # Column sizes (adjusted to match previous updates)
         if section == "writing":
-            column_sizes_running = [0.7, 5.5, 1, 1, 0.8, 1.2, 1, 1, 1]  
+            column_sizes_running = [0.7, 5.5, 1, 1, 0.8, 1.2, 1, 1, 1,1,1,1]  
             column_sizes_pending = [0.7, 5.5, 1, 1, 0.8, 1]            
             column_sizes_completed = [0.7, 5.5, 1, 1, 1, 1]         
         elif section == "proofreading":
@@ -1270,7 +1331,7 @@ for section, config in sections.items():
             column_sizes_pending = [0.7, 5.5, 1, 1, 1.2, 1, 1]         
             column_sizes_completed = [0.7, 5.5, 1, 1, 1.2, 1, 1]       
         elif section == "cover":
-            column_sizes_running = [0.8, 5.4, 1.2, 1.2, 0.7, 0.7, 0.75, 1.2, 1, 1, 0.8, 0.7]  
+            column_sizes_running = [0.8, 5, 1.2, 1.2, 0.7, 0.7, 0.75, 1.3, 1, 1, 1.2]  
             column_sizes_pending = [0.8, 5.5, 1, 1.2, 1, 1, 1, 0.8, 1]            
             column_sizes_completed = [0.7, 5.5, 1, 1, 1, 1]                   
         
