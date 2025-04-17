@@ -378,7 +378,6 @@ def render_month_selector(books_df):
     selected_month = st.pills("Select Month", unique_months, default=default_month, 
                              key=f"month_selector_{st.session_state.get('section', 'writing')}", 
                              label_visibility='collapsed')
-    st.caption(f"Welcome, {st.session_state.user}!")
     return selected_month
 
 from datetime import datetime, timedelta
