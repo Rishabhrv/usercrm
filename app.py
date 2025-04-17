@@ -134,7 +134,7 @@ def logout():
     except requests.RequestException:
         st.error("Unable to contact logout server. Please try again later.")
 
-# Run validation
+# # Run validation
 validate_token()
 
 user_role = st.session_state.get("role", "Guest")
@@ -208,7 +208,6 @@ def fetch_books(months_back: int = 4, section: str = "writing") -> pd.DataFrame:
             ],
             "extra": [
                 "formatting_end AS 'Formatting End'",
-                # Aggregate photo_received and details_sent
                 "(SELECT MIN(ba.photo_recive) FROM book_authors ba WHERE ba.book_id = b.book_id) AS 'All Photos Received'",
                 "(SELECT MIN(ba.author_details_sent) FROM book_authors ba WHERE ba.book_id = b.book_id) AS 'All Details Sent'"
             ],
@@ -1328,7 +1327,7 @@ for section, config in sections.items():
                 books_df['Proofreading End'].isnull()
             ]
             pending_books = books_df[
-                books_df['Writing End'].notnull() & 
+                (books_df['Writing End'].notnull() | (books_df['Is Publish Only'] == 1)) & 
                 books_df['Proofreading Start'].isnull()
             ]
             completed_books = books_df[
