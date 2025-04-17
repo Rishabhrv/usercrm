@@ -7,7 +7,6 @@ from sqlalchemy import text
 warnings.simplefilter('ignore')
 import requests
 import datetime
-import time
 #from datetime import datetime, timedelta
 
 
@@ -47,7 +46,7 @@ def validate_token():
     if 'token' not in st.session_state:
         token = st.query_params.get("token")
         if not token:
-            st.error("Access denied: Please log in First")
+            st.error("Access denied: Please log in first")
             st.markdown(f"[Go to Login]({FLASK_LOGIN_URL})")
             st.stop()
         st.session_state.token = token if isinstance(token, str) else token[0]
@@ -57,7 +56,7 @@ def validate_token():
     try:
         # Local validation
         decoded = jwt.decode(token, JWT_SECRET, algorithms=['HS256'])
-        if not all(key in decoded for key in ['username', 'role', 'exp']):
+        if not all(key in decoded for key in ['email', 'role', 'exp']):
             raise jwt.InvalidTokenError("Missing required fields")
 
         # Server-side validation
@@ -70,7 +69,7 @@ def validate_token():
         if role not in VALID_ROLES:
             raise jwt.InvalidTokenError(f"Invalid role '{role}'")
 
-        st.session_state.user = decoded['username']
+        st.session_state.email = decoded['email']
         st.session_state.role = role
         st.session_state.exp = decoded['exp']
 
@@ -102,7 +101,7 @@ def validate_token():
 
 def clear_auth_session():
     # Clear authentication-related session state keys
-    keys_to_clear = ['token', 'user', 'role', 'exp']
+    keys_to_clear = ['token', 'email', 'role', 'exp']
     for key in keys_to_clear:
         if key in st.session_state:
             del st.session_state[key]
