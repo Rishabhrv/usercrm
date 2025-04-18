@@ -35,11 +35,23 @@ st.markdown("""
 
 
 # Configuration
-FLASK_VALIDATE_URL = "https://crmserver.agvolumes.com/validate_token"
-JWT_SECRET = "O7qRK8GGKIwXsKn9cvhjXyeBsv9Ur9fD"
-FLASK_LOGIN_URL = "https://crmserver.agvolumes.com/login"
-VALID_ROLES = {"writer", "admin", "proofreader", "formatter", "cover_designer"}
-FLASK_LOGOUT_URL = "https://crmserver.agvolumes.com/logout"
+# FLASK_VALIDATE_URL = "https://crmserver.agvolumes.com/validate_token"
+# FLASK_USER_DETAILS_URL = "http://localhost:5000/user_details"
+# JWT_SECRET = st.secrets["general"]["JWT_SECRET"]
+# FLASK_LOGIN_URL = "https://crmserver.agvolumes.com/login"
+# FLASK_LOGOUT_URL = "https://crmserver.agvolumes.com/logout"
+# VALID_ROLES = {"admin", "user"}
+# VALID_APPS = {"main", "operations"}
+
+
+# Configuration
+FLASK_VALIDATE_URL = "http://localhost:5000/validate_token"
+JWT_SECRET = st.secrets["general"]["JWT_SECRET"]
+FLASK_USER_DETAILS_URL = "http://localhost:5000/user_details"
+FLASK_LOGIN_URL = "http://localhost:5000/login"
+FLASK_LOGOUT_URL = "http://localhost:5000/logout"
+VALID_ROLES = {"admin", "user"}
+VALID_APPS = {"main", "operations"}
 
 def validate_token():
     # Check if token exists in session state or query params
@@ -54,24 +66,40 @@ def validate_token():
     token = st.session_state.token
 
     try:
-        # Local validation
+        # Local validation: only check for user_id and exp
         decoded = jwt.decode(token, JWT_SECRET, algorithms=['HS256'])
-        if not all(key in decoded for key in ['email', 'role', 'exp']):
-            raise jwt.InvalidTokenError("Missing required fields")
+        if 'user_id' not in decoded or 'exp' not in decoded:
+            raise jwt.InvalidTokenError("Missing user_id or exp")
 
-        # Server-side validation
+        # Server-side token validation
         response = requests.post(FLASK_VALIDATE_URL, json={"token": token}, timeout=5)
         if response.status_code != 200 or not response.json().get('valid'):
             error = response.json().get('error', 'Invalid token')
             raise jwt.InvalidTokenError(error)
 
-        role = decoded['role'].lower()
+        # Fetch user details
+        details_response = requests.post(FLASK_USER_DETAILS_URL, json={"token": token}, timeout=5)
+        if details_response.status_code != 200 or not details_response.json().get('valid'):
+            error = details_response.json().get('error', 'Unable to fetch user details')
+            raise jwt.InvalidTokenError(f"User details error: {error}")
+
+        user_details = details_response.json()
+        role = user_details['role'].lower()
+        app = user_details['app'].lower()
+        access = user_details['access']
+        email = user_details['email']
+
         if role not in VALID_ROLES:
             raise jwt.InvalidTokenError(f"Invalid role '{role}'")
+        if app not in VALID_APPS:
+            raise jwt.InvalidTokenError(f"Invalid app '{app}'")
+        
+        if app == 'operations':
+            valid_access = {"writer", "proofreader", "formatter", "cover_designer"}
+            if not (len(access) == 1 and access[0] in valid_access):
+                raise jwt.InvalidTokenError(f"Invalid access for operations app: {access}")
 
-        st.session_state.email = decoded['email']
-        st.session_state.role = role
-        st.session_state.exp = decoded['exp']
+        st.session_state.access = access
 
     except jwt.ExpiredSignatureError:
         st.error("Access denied: Token expired. Please log in again.")
@@ -101,43 +129,18 @@ def validate_token():
 
 def clear_auth_session():
     # Clear authentication-related session state keys
-    keys_to_clear = ['token', 'email', 'role', 'exp']
+    keys_to_clear = ['token', 'email', 'role', 'app', 'access', 'exp']
     for key in keys_to_clear:
         if key in st.session_state:
             del st.session_state[key]
     # Clear query parameters to prevent token reuse
     st.query_params.clear()
 
-def logout():
-    try:
-        # Send token to Flask for blacklisting (optional)
-        token = st.session_state.get('token', '')
-        response = requests.post(FLASK_LOGOUT_URL, json={"token": token}, timeout=5)
-        if response.status_code == 200 and response.json().get('success'):
-            # Clear authentication-related session state and query params
-            clear_auth_session()
-            # Use JavaScript to clear browser history and redirect
-            st.write(
-                f"""
-                <script>
-                    window.history.replaceState(null, '', '{FLASK_LOGIN_URL}');
-                    window.location.href = '{FLASK_LOGIN_URL}';
-                </script>
-                """,
-                unsafe_allow_html=True
-            )
-            st.success("You have been logged out.")
-            st.markdown(f"[Go to Login]({FLASK_LOGIN_URL})")
-            st.stop()
-        else:
-            st.error("Logout failed. Please try again.")
-    except requests.RequestException:
-        st.error("Unable to contact logout server. Please try again later.")
 
-# # Run validation
+# Run validation
 validate_token()
 
-user_role = st.session_state.get("role", "Guest")
+user_role = st.session_state.get("access", [])[0]
 
 st.cache_data.clear()
 
@@ -807,6 +810,7 @@ st.markdown("""
     }
     .header {
         font-weight: bold;
+        font-size: 14px; 
     }
     .header-line {
         border-bottom: 1px solid #ddd;
@@ -1308,7 +1312,7 @@ sections = {
 for section, config in sections.items():
     if user_role == config["role"] or user_role == "admin":
         st.session_state['section'] = section
-        books_df = fetch_books(months_back=4, section=section)
+        books_df = fetch_books(months_back=4 , section=section)
         
         if section == "writing":
             running_books = books_df[
