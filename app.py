@@ -7,7 +7,6 @@ from sqlalchemy import text
 warnings.simplefilter('ignore')
 import requests
 import datetime
-#from datetime import datetime, timedelta
 
 
 # Set page configuration
@@ -35,23 +34,23 @@ st.markdown("""
 
 
 # Configuration
-# FLASK_VALIDATE_URL = "https://crmserver.agvolumes.com/validate_token"
-# FLASK_USER_DETAILS_URL = "http://localhost:5000/user_details"
-# JWT_SECRET = st.secrets["general"]["JWT_SECRET"]
-# FLASK_LOGIN_URL = "https://crmserver.agvolumes.com/login"
-# FLASK_LOGOUT_URL = "https://crmserver.agvolumes.com/logout"
-# VALID_ROLES = {"admin", "user"}
-# VALID_APPS = {"main", "operations"}
+FLASK_VALIDATE_URL = "https://crmserver.agvolumes.com/validate_token"
+FLASK_USER_DETAILS_URL = "https://crmserver.agvolumes.com/user_details"
+JWT_SECRET = st.secrets["general"]["JWT_SECRET"]
+FLASK_LOGIN_URL = "https://crmserver.agvolumes.com/login"
+FLASK_LOGOUT_URL = "https://crmserver.agvolumes.com/logout"
+VALID_ROLES = {"admin", "user"}
+VALID_APPS = {"main", "operations"}
 
 
 # Configuration
-FLASK_VALIDATE_URL = "http://localhost:5000/validate_token"
-JWT_SECRET = st.secrets["general"]["JWT_SECRET"]
-FLASK_USER_DETAILS_URL = "http://localhost:5000/user_details"
-FLASK_LOGIN_URL = "http://localhost:5000/login"
-FLASK_LOGOUT_URL = "http://localhost:5000/logout"
-VALID_ROLES = {"admin", "user"}
-VALID_APPS = {"main", "operations"}
+# FLASK_VALIDATE_URL = "http://localhost:5000/validate_token"
+# JWT_SECRET = st.secrets["general"]["JWT_SECRET"]
+# FLASK_USER_DETAILS_URL = "http://localhost:5000/user_details"
+# FLASK_LOGIN_URL = "http://localhost:5000/login"
+# FLASK_LOGOUT_URL = "http://localhost:5000/logout"
+# VALID_ROLES = {"admin", "user"}
+# VALID_APPS = {"main", "operations"}
 
 def validate_token():
     # Check if token exists in session state or query params
@@ -87,7 +86,6 @@ def validate_token():
         role = user_details['role'].lower()
         app = user_details['app'].lower()
         access = user_details['access']
-        email = user_details['email']
 
         if role not in VALID_ROLES:
             raise jwt.InvalidTokenError(f"Invalid role '{role}'")
