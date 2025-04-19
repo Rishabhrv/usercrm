@@ -75,17 +75,6 @@ VALID_APPS = {"main", "operations"}
 # VALID_APPS = {"main", "operations"}
 
 def validate_token():
-    logger.info("Starting token validation")
-    
-    # Test connectivity to Flask
-    try:
-        test_response = requests.get("http://127.0.0.1:5001", timeout=5)
-        logger.debug(f"Test request to Flask: status={test_response.status_code}, response={test_response.text}")
-        # Removed st.write to avoid displaying HTML in UI
-    except requests.RequestException as e:
-        logger.error(f"Test request to Flask failed: {str(e)}", exc_info=True)
-        st.error(f"Test request to Flask failed: {str(e)}")
-    
     # Check if token exists
     if 'token' not in st.session_state:
         token = st.query_params.get("token")
@@ -95,30 +84,24 @@ def validate_token():
             st.markdown(f"[Go to Login]({FLASK_LOGIN_URL})")
             st.stop()
         st.session_state.token = token if isinstance(token, str) else token[0]
-        logger.debug(f"Token received from query params: {st.session_state.token}")
 
     token = st.session_state.token
 
     try:
         # Local validation
         decoded = jwt.decode(token, JWT_SECRET, algorithms=['HS256'])
-        logger.debug(f"Decoded token: {decoded}")
         if 'user_id' not in decoded or 'exp' not in decoded:
             raise jwt.InvalidTokenError("Missing user_id or exp")
 
         # Server-side token validation
-        logger.debug(f"Requesting validation: {FLASK_VALIDATE_URL}")
         response = requests.post(FLASK_VALIDATE_URL, json={"token": token}, timeout=10)
-        logger.debug(f"Validate response: status={response.status_code}, body={response.text}")
         if response.status_code != 200 or not response.json().get('valid'):
             error = response.json().get('error', 'Invalid token')
             logger.error(f"Token validation failed: {error}")
             raise jwt.InvalidTokenError(error)
 
         # Fetch user details
-        logger.debug(f"Requesting user details: {FLASK_USER_DETAILS_URL}")
         details_response = requests.post(FLASK_USER_DETAILS_URL, json={"token": token}, timeout=10)
-        logger.debug(f"User details response: status={details_response.status_code}, body={details_response.text}")
         if details_response.status_code != 200 or not details_response.json().get('valid'):
             error = details_response.json().get('error', 'Unable to fetch user details')
             logger.error(f"User details fetch failed: {error}")
@@ -130,6 +113,7 @@ def validate_token():
         access = user_details['access']
         email = user_details['email']
         start_date = user_details['start_date']
+        username = user_details['username']
 
         if role not in VALID_ROLES:
             logger.error(f"Invalid role: {role}")
@@ -159,6 +143,7 @@ def validate_token():
         st.session_state.app = app
         st.session_state.access = access
         st.session_state.start_date = start_date
+        st.session_state.username = username
         st.session_state.exp = decoded['exp']
         logger.info(f"Token validated successfully for user: {email}")
 
@@ -200,19 +185,19 @@ def validate_token():
         st.stop()
 
 def clear_auth_session():
-    logger.info("Clearing authentication session")
-    keys_to_clear = ['token', 'user_id', 'email', 'role', 'app', 'access', 'start_date', 'end_date', 'exp']
+    keys_to_clear = ['token', 'user_id', 'email', 'role', 'app', 'access', 'start_date', 'username', 'exp']
     for key in keys_to_clear:
         if key in st.session_state:
             del st.session_state[key]
     st.query_params.clear()
-    logger.debug("Session and query params cleared")
+    logger.info("Session and query params cleared")
 
 
 # Run validation
 validate_token()
 
 user_role = st.session_state.get("access", [])[0]
+user_name = st.session_state.get("username", "Unknown")
 
 st.cache_data.clear()
 
