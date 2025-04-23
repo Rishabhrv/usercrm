@@ -181,7 +181,7 @@ pyrightconfig.json
 [Ss]cripts
 pyvenv.cfg
 pip-selfcheck.json
-.streamlit
+.streamlit/secrets.toml
 notebook.ipynb
 tosql.ipynb
 databasedata
